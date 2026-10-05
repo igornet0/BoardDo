@@ -375,6 +375,9 @@ pub struct WebSearchHit {
     pub snippet: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Publication date / age as reported by the provider (news freshness).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -428,6 +431,9 @@ pub struct WebFetchResult {
     pub body: String,
     #[serde(default)]
     pub truncated: bool,
+    /// `Retry-After` in seconds (429 / 503), when the server sent one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

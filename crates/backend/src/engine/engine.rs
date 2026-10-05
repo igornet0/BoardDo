@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::connections::{ConnectionProvider, NullConnectionProvider};
 use crate::engine::node_state::{NodeStateStore, NullNodeStateStore};
 use crate::integrations::media::MediaStore;
+use crate::integrations::browser::{self, BrowserRenderer};
 use crate::integrations::web::{HttpWebGateway, WebGateway};
 use crate::tools::service::CustomToolGateway;
 use boarddo_telegram::{NullTelegramUserGateway, TelegramUserGateway};
@@ -24,6 +25,7 @@ pub struct Engine {
     connections: Arc<dyn ConnectionProvider>,
     telegram_user: Arc<dyn TelegramUserGateway>,
     web: Arc<dyn WebGateway>,
+    browser: Arc<dyn BrowserRenderer>,
     node_state: Arc<dyn NodeStateStore>,
     custom_tools: Arc<dyn CustomToolGateway>,
     media: MediaStore,
@@ -42,7 +44,8 @@ impl Engine {
             executor,
             connections,
             telegram_user: Arc::new(NullTelegramUserGateway),
-            web: Arc::new(HttpWebGateway::duckduckgo()),
+            web: Arc::new(HttpWebGateway::from_env()),
+            browser: browser::shared(),
             node_state: Arc::new(NullNodeStateStore),
             custom_tools: Arc::new(crate::tools::service::NullCustomToolGateway),
             media: MediaStore::new(
@@ -68,6 +71,11 @@ impl Engine {
 
     pub fn with_web(mut self, web: Arc<dyn WebGateway>) -> Self {
         self.web = web;
+        self
+    }
+
+    pub fn with_browser(mut self, browser: Arc<dyn BrowserRenderer>) -> Self {
+        self.browser = browser;
         self
     }
 
@@ -125,6 +133,7 @@ impl Engine {
         .with_connections(self.connections.clone())
         .with_telegram_user(self.telegram_user.clone())
         .with_web(self.web.clone())
+        .with_browser(self.browser.clone())
         .with_node_state(self.node_state.clone())
         .with_custom_tools(self.custom_tools.clone())
         .with_media(self.media.clone());

@@ -149,6 +149,16 @@ fn validate_node_config(node: &Node) -> Vec<String> {
                 errors.push(format!("node `{}`: missing parameter `url`", node.id));
             }
         }
+        type_ids::WEB_EXTRACT => {
+            for key in ["url", "instruction"] {
+                if cfg.get(key).is_none() {
+                    errors.push(format!("node `{}`: missing parameter `{key}`", node.id));
+                }
+            }
+            if cfg.get("connection_id").and_then(Value::as_str).is_none() {
+                errors.push(format!("node `{}`: missing `connection_id`", node.id));
+            }
+        }
         type_ids::AI_ANALYZE => {
             if cfg.get("prompt").is_none() && cfg.get("text").is_none() {
                 errors.push(format!(

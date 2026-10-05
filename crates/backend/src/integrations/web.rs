@@ -1,7 +1,8 @@
 //! Typed web / internet-research gateway.
 //!
 //! Agents call this API; they never get a raw HTTP client.
-//! Search is live (DuckDuckGo Instant Answer). open/fetch/extract stay stubbed.
+//! Search is live (DuckDuckGo + Google News RSS). `fetch` downloads a page under
+//! [`WebPolicy`]; `open` / `extract` turn it into readable text via [`web_reader`].
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,12 +12,169 @@ use boarddo_shared::v2::{
     WebError, WebExtractRequest, WebExtractResult, WebFetchRequest, WebFetchResult, WebOpenRequest,
     WebOpenResult, WebPolicy, WebSearchHit, WebSearchRequest, WebSearchResult,
 };
+use chrono::{DateTime, Utc};
 use serde_json::Value;
+
+use super::web_reader::{self, ReadOptions};
+
+/// Browser-like UA: many sites serve stripped or blocked pages to unknown bots.
+const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/126.0 Safari/537.36 BoardDo/0.1";
+const MAX_REDIRECTS: usize = 5;
 
 /// Pluggable search backend used by [`HttpWebGateway`].
 #[async_trait]
 pub trait SearchProvider: Send + Sync {
-    async fn search(&self, query: &str, limit: u32) -> Result<Vec<WebSearchHit>, WebError>;
+    async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        freshness: Option<Freshness>,
+    ) -> Result<Vec<WebSearchHit>, WebError>;
+}
+
+/// Time window for search results ("latest news" must not return last year's items).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Freshness {
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
+impl Freshness {
+    /// Accepts `day|week|month|year` and `1d|7d|30d|365d`-style windows.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "day" | "d" | "1d" | "24h" | "pd" => Some(Self::Day),
+            "week" | "w" | "7d" | "pw" => Some(Self::Week),
+            "month" | "m" | "30d" | "31d" | "pm" => Some(Self::Month),
+            "year" | "y" | "365d" | "1y" | "py" => Some(Self::Year),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::Year => "year",
+        }
+    }
+
+    pub fn days(self) -> i64 {
+        match self {
+            Self::Day => 1,
+            Self::Week => 7,
+            Self::Month => 31,
+            Self::Year => 366,
+        }
+    }
+
+    pub fn wider(self) -> Option<Self> {
+        match self {
+            Self::Day => Some(Self::Week),
+            Self::Week => Some(Self::Month),
+            Self::Month => Some(Self::Year),
+            Self::Year => None,
+        }
+    }
+
+    /// Oldest publication time still inside the window.
+    pub fn cutoff(self, now: DateTime<Utc>) -> DateTime<Utc> {
+        now - chrono::Duration::days(self.days())
+    }
+
+    fn brave(self) -> &'static str {
+        match self {
+            Self::Day => "pd",
+            Self::Week => "pw",
+            Self::Month => "pm",
+            Self::Year => "py",
+        }
+    }
+
+    fn google_news_when(self) -> &'static str {
+        match self {
+            Self::Day => "1d",
+            Self::Week => "7d",
+            Self::Month => "30d",
+            Self::Year => "1y",
+        }
+    }
+}
+
+/// Parse provider / page dates: RFC 3339, RFC 2822 (RSS), ISO without zone,
+/// plain dates and relative "3 hours ago".
+pub fn parse_published(raw: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc2822(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    for fmt in [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+    ] {
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+            return Some(dt.and_utc());
+        }
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s.get(..10).unwrap_or(s), "%Y-%m-%d") {
+        return d.and_hms_opt(0, 0, 0).map(|dt| dt.and_utc());
+    }
+    let lower = s.to_ascii_lowercase();
+    let rest = lower.strip_suffix(" ago")?;
+    let (n, unit) = rest.split_once(' ')?;
+    let n: i64 = n.trim().parse().ok()?;
+    let unit = unit.trim().trim_end_matches('s');
+    let delta = match unit {
+        "second" => chrono::Duration::seconds(n),
+        "minute" => chrono::Duration::minutes(n),
+        "hour" => chrono::Duration::hours(n),
+        "day" => chrono::Duration::days(n),
+        "week" => chrono::Duration::weeks(n),
+        "month" => chrono::Duration::days(n * 30),
+        "year" => chrono::Duration::days(n * 365),
+        _ => return None,
+    };
+    Some(now - delta)
+}
+
+/// Normalise dates to RFC 3339, drop hits older than the window and put the
+/// newest first. Undated hits are kept (after dated ones): providers already
+/// applied the window server-side.
+pub fn apply_freshness(
+    hits: Vec<WebSearchHit>,
+    freshness: Option<Freshness>,
+    now: DateTime<Utc>,
+) -> Vec<WebSearchHit> {
+    let mut dated: Vec<(Option<DateTime<Utc>>, WebSearchHit)> = hits
+        .into_iter()
+        .map(|mut hit| {
+            let parsed = hit.published.as_deref().and_then(|p| parse_published(p, now));
+            if let Some(dt) = parsed {
+                hit.published = Some(dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            }
+            (parsed, hit)
+        })
+        .collect();
+    let Some(freshness) = freshness else {
+        return dated.into_iter().map(|(_, h)| h).collect();
+    };
+    let cutoff = freshness.cutoff(now);
+    dated.retain(|(dt, _)| dt.is_none_or(|dt| dt >= cutoff));
+    // Stable sort: newest first, undated keep provider order at the end.
+    dated.sort_by(|(a, _), (b, _)| b.cmp(a));
+    dated.into_iter().map(|(_, h)| h).collect()
 }
 
 /// Runtime-owned internet capability. Implementations enforce [`WebPolicy`]
@@ -86,7 +244,7 @@ impl WebGateway for NullWebGateway {
     }
 }
 
-/// Search + fetch capable gateway. `open` remains a fetch alias; extract is text cleanup.
+/// Search + fetch capable gateway; `open` / `extract` read pages into clean text.
 pub struct HttpWebGateway {
     search: Arc<dyn SearchProvider>,
     client: reqwest::Client,
@@ -97,11 +255,45 @@ impl HttpWebGateway {
         Self::with_search(Arc::new(DuckDuckGoSearchProvider::default()))
     }
 
+    /// Search provider chain from the environment:
+    /// `BRAVE_SEARCH_API_KEY` → Brave Search API, `SEARXNG_URL` → SearXNG instance,
+    /// then the keyless DuckDuckGo / Google News fallback.
+    pub fn from_env() -> Self {
+        let env = |k: &str| {
+            std::env::var(k)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let mut providers: Vec<Arc<dyn SearchProvider>> = Vec::new();
+        if let Some(key) = env("BRAVE_SEARCH_API_KEY") {
+            providers.push(Arc::new(BraveSearchProvider::new(key)));
+        }
+        if let Some(url) = env("SEARXNG_URL") {
+            providers.push(Arc::new(SearxngSearchProvider::new(url)));
+        }
+        providers.push(Arc::new(DuckDuckGoSearchProvider::default()));
+        Self::with_search(Arc::new(ChainSearchProvider { providers }))
+    }
+
     pub fn with_search(search: Arc<dyn SearchProvider>) -> Self {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static(
+                "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+            ),
+        );
+        headers.insert(
+            reqwest::header::ACCEPT_LANGUAGE,
+            reqwest::header::HeaderValue::from_static("ru,en;q=0.8"),
+        );
+        // Redirects are followed by hand so every hop passes `WebPolicy::check_url`.
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
-            .user_agent("BoardDo/0.1 (+https://boarddo.local)")
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .user_agent(PAGE_USER_AGENT)
+            .default_headers(headers)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("reqwest client");
         Self { search, client }
@@ -122,8 +314,11 @@ impl WebGateway for HttpWebGateway {
             return Err(WebError::Upstream("search query is empty".into()));
         }
         let limit = request.limit.unwrap_or(8).clamp(1, 20);
-        let results = self.search.search(query, limit).await?;
-        Ok(WebSearchResult { results })
+        let freshness = request.freshness.as_deref().and_then(Freshness::parse);
+        let results = self.search.search(query, limit, freshness).await?;
+        Ok(WebSearchResult {
+            results: apply_freshness(results, freshness, Utc::now()),
+        })
     }
 
     async fn open(
@@ -142,11 +337,12 @@ impl WebGateway for HttpWebGateway {
                 policy,
             )
             .await?;
+        let page = read_fetched(&fetched, &ReadOptions::default())?;
         Ok(WebOpenResult {
             url: fetched.url,
-            title: first_html_title(&fetched.body).unwrap_or_default(),
-            content: fetched.body,
-            links: Vec::new(),
+            title: page.title,
+            content: page.text,
+            links: page.links.into_iter().map(|l| l.url).collect(),
         })
     }
 
@@ -157,52 +353,96 @@ impl WebGateway for HttpWebGateway {
     ) -> Result<WebFetchResult, WebError> {
         policy.check_fetch()?;
         policy.check_budget(0)?;
-        let _parsed = policy.check_url(&request.url)?;
         let method = if request.method.trim().is_empty() {
             "GET".to_string()
         } else {
             request.method.to_ascii_uppercase()
         };
         policy.check_method(&method)?;
+        let method = reqwest::Method::from_bytes(method.as_bytes())
+            .map_err(|_| WebError::MethodDenied(method.clone()))?;
 
-        let mut builder = self
-            .client
-            .request(
-                reqwest::Method::from_bytes(method.as_bytes())
-                    .map_err(|_| WebError::MethodDenied(method.clone()))?,
-                &request.url,
-            )
-            .timeout(policy.timeout());
-        for (k, v) in &request.headers {
-            builder = builder.header(k, v);
+        let mut url = request.url.trim().to_string();
+        let mut response = None;
+        for _ in 0..=MAX_REDIRECTS {
+            policy.check_url(&url)?;
+            let mut builder = self
+                .client
+                .request(method.clone(), &url)
+                .timeout(policy.timeout());
+            for (k, v) in &request.headers {
+                builder = builder.header(k, v);
+            }
+            let resp = builder
+                .send()
+                .await
+                .map_err(upstream_error)?;
+            let location = resp
+                .status()
+                .is_redirection()
+                .then(|| resp.headers().get(reqwest::header::LOCATION))
+                .flatten()
+                .and_then(|v| v.to_str().ok());
+            match location {
+                Some(location) => {
+                    url = resp
+                        .url()
+                        .join(location)
+                        .map_err(|e| WebError::InvalidUrl(e.to_string()))?
+                        .to_string();
+                }
+                None => {
+                    response = Some(resp);
+                    break;
+                }
+            }
         }
-        let response = builder
-            .send()
-            .await
-            .map_err(|e| WebError::Upstream(e.to_string()))?;
+        let Some(mut response) = response else {
+            return Err(WebError::Upstream(format!(
+                "too many redirects (>{MAX_REDIRECTS})"
+            )));
+        };
+
         let status = response.status().as_u16();
+        let retry_after = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| parse_retry_after(v, Utc::now()));
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
-        let bytes = response
-            .bytes()
+        // Stream the body so oversized pages are cut off without downloading them fully.
+        let max = policy.max_page_size as usize;
+        let mut bytes = Vec::new();
+        let mut truncated = false;
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|e| WebError::Upstream(e.to_string()))?;
-        let truncated = bytes.len() as u64 > policy.max_page_size;
-        let slice = if truncated {
-            &bytes[..policy.max_page_size as usize]
+            .map_err(upstream_error)?
+        {
+            let room = max.saturating_sub(bytes.len());
+            if chunk.len() > room {
+                bytes.extend_from_slice(&chunk[..room]);
+                truncated = true;
+                break;
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body = if web_reader::is_textual(content_type.as_deref()) {
+            web_reader::decode_body(&bytes, content_type.as_deref())
         } else {
-            &bytes
+            String::new()
         };
-        let body = String::from_utf8_lossy(slice).into_owned();
         Ok(WebFetchResult {
-            url: request.url,
+            url,
             status,
             content_type,
             body,
             truncated,
+            retry_after,
         })
     }
 
@@ -212,9 +452,21 @@ impl WebGateway for HttpWebGateway {
         policy: &WebPolicy,
     ) -> Result<WebExtractResult, WebError> {
         policy.check_enabled()?;
-        let mut text = request.content.clone().unwrap_or_default();
-        if text.is_empty() {
-            if let Some(url) = &request.url {
+        let opts = ReadOptions {
+            max_chars: request.max_chars.unwrap_or(8_000) as usize,
+            selector: request.selector.clone(),
+            include_links: true,
+        };
+        let page = match (&request.content, &request.url) {
+            (Some(content), url) if !content.is_empty() => {
+                if web_reader::is_html(None, content) {
+                    web_reader::read_html(content, url.as_deref().unwrap_or(""), &opts)
+                        .map_err(WebError::Upstream)?
+                } else {
+                    plain_page(content, opts.max_chars)
+                }
+            }
+            (_, Some(url)) => {
                 let fetched = self
                     .fetch(
                         WebFetchRequest {
@@ -225,19 +477,304 @@ impl WebGateway for HttpWebGateway {
                         policy,
                     )
                     .await?;
-                text = fetched.body;
+                read_fetched(&fetched, &opts)?
             }
-        }
-        let stripped = strip_tags_simple(&text);
-        let max = request.max_chars.unwrap_or(8_000) as usize;
-        let clipped: String = stripped.chars().take(max).collect();
+            _ => {
+                return Err(WebError::Upstream(
+                    "extract needs `url` or `content`".into(),
+                ));
+            }
+        };
         Ok(WebExtractResult {
             document_id: request.document_id,
-            text: clipped,
-            chunks: Vec::new(),
-            links: Vec::new(),
+            chunks: web_reader::chunk_text(&page.text, 2_000),
+            text: page.text,
+            links: page.links.into_iter().map(|l| l.url).collect(),
         })
     }
+}
+
+/// `Retry-After`: delay in seconds or an HTTP date.
+pub fn parse_retry_after(value: &str, now: DateTime<Utc>) -> Option<u64> {
+    let value = value.trim();
+    if let Ok(secs) = value.parse::<u64>() {
+        return Some(secs);
+    }
+    let at = DateTime::parse_from_rfc2822(value).ok()?.with_timezone(&Utc);
+    Some(at.signed_duration_since(now).num_seconds().max(0) as u64)
+}
+
+/// Upstream error with its cause chain ("error sending request" alone hides TLS / DNS issues).
+fn upstream_error(e: reqwest::Error) -> WebError {
+    let mut msg = e.to_string();
+    let mut source = std::error::Error::source(&e);
+    while let Some(cause) = source {
+        msg.push_str(": ");
+        msg.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    WebError::Upstream(msg)
+}
+
+/// Turn a fetched response into readable content (HTML is parsed, text passes through).
+pub fn read_fetched(
+    fetched: &WebFetchResult,
+    opts: &ReadOptions,
+) -> Result<web_reader::PageContent, WebError> {
+    if !(200..300).contains(&fetched.status) {
+        return Err(WebError::Upstream(format!(
+            "HTTP {} for {}",
+            fetched.status, fetched.url
+        )));
+    }
+    if !web_reader::is_textual(fetched.content_type.as_deref()) {
+        return Err(WebError::Upstream(format!(
+            "unsupported content type {}",
+            fetched.content_type.as_deref().unwrap_or("?")
+        )));
+    }
+    if web_reader::is_html(fetched.content_type.as_deref(), &fetched.body) {
+        web_reader::read_html(&fetched.body, &fetched.url, opts).map_err(WebError::Upstream)
+    } else {
+        Ok(plain_page(&fetched.body, opts.max_chars))
+    }
+}
+
+fn plain_page(text: &str, max_chars: usize) -> web_reader::PageContent {
+    let (text, truncated) = web_reader::clip_chars(text.trim(), max_chars);
+    web_reader::PageContent {
+        text,
+        truncated,
+        ..Default::default()
+    }
+}
+
+/// Tries providers in order and tops up results until `limit` is reached.
+/// A failing provider is skipped so a bad key never takes search down.
+pub struct ChainSearchProvider {
+    pub providers: Vec<Arc<dyn SearchProvider>>,
+}
+
+#[async_trait]
+impl SearchProvider for ChainSearchProvider {
+    async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        freshness: Option<Freshness>,
+    ) -> Result<Vec<WebSearchHit>, WebError> {
+        let mut hits = Vec::new();
+        let mut last_err = None;
+        for provider in &self.providers {
+            if hits.len() >= limit as usize {
+                break;
+            }
+            // Filter per provider so stale hits don't stop the chain from topping up.
+            match provider.search(query, limit, freshness).await {
+                Ok(found) => merge_hits(&mut hits, apply_freshness(found, freshness, Utc::now())),
+                Err(e) => {
+                    tracing::warn!("search provider failed: {e}");
+                    last_err = Some(e);
+                }
+            }
+        }
+        if hits.is_empty() {
+            if let Some(e) = last_err {
+                return Err(e);
+            }
+        }
+        hits.truncate(limit as usize);
+        Ok(hits)
+    }
+}
+
+/// Brave Search API (https://brave.com/search/api/) — direct publisher URLs,
+/// a dedicated news index for news-like queries.
+pub struct BraveSearchProvider {
+    api_key: String,
+    client: reqwest::Client,
+}
+
+impl BraveSearchProvider {
+    pub fn new(api_key: String) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest client");
+        Self { api_key, client }
+    }
+
+    async fn get(&self, url: &str) -> Result<Value, WebError> {
+        let response = self
+            .client
+            .get(url)
+            .header("Accept", "application/json")
+            .header("X-Subscription-Token", &self.api_key)
+            .send()
+            .await
+            .map_err(upstream_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(WebError::Upstream(format!("brave search: HTTP {status}")));
+        }
+        response
+            .json()
+            .await
+            .map_err(|e| WebError::Upstream(format!("brave search: {e}")))
+    }
+}
+
+#[async_trait]
+impl SearchProvider for BraveSearchProvider {
+    async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        freshness: Option<Freshness>,
+    ) -> Result<Vec<WebSearchHit>, WebError> {
+        let q = urlencoding_lite(query);
+        let count = limit.min(20);
+        let window = freshness
+            .map(|f| format!("&freshness={}", f.brave()))
+            .unwrap_or_default();
+        let mut hits = Vec::new();
+        if looks_like_news_query(query) {
+            let news = self
+                .get(&format!(
+                    "https://api.search.brave.com/res/v1/news/search?q={q}&count={count}{window}"
+                ))
+                .await?;
+            hits.extend(parse_brave_results(news.get("results"), "brave-news"));
+        }
+        if hits.len() < limit as usize {
+            let web = self
+                .get(&format!(
+                    "https://api.search.brave.com/res/v1/web/search?q={q}&count={count}{window}"
+                ))
+                .await?;
+            let found = parse_brave_results(web.pointer("/web/results"), "brave");
+            merge_hits(&mut hits, found);
+        }
+        hits.truncate(limit as usize);
+        Ok(hits)
+    }
+}
+
+pub fn parse_brave_results(results: Option<&Value>, source: &str) -> Vec<WebSearchHit> {
+    let Some(Value::Array(items)) = results else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let url = item.get("url").and_then(Value::as_str)?.to_string();
+            let title = item.get("title").and_then(Value::as_str).unwrap_or(&url);
+            let snippet = item
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let published = item
+                .get("page_age")
+                .or_else(|| item.get("age"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            Some(WebSearchHit {
+                title: strip_tags(title),
+                url,
+                snippet: strip_tags(snippet),
+                source: Some(source.into()),
+                published,
+            })
+        })
+        .collect()
+}
+
+/// Self-hosted SearXNG metasearch (needs `json` in `search.formats` of settings.yml).
+pub struct SearxngSearchProvider {
+    base_url: String,
+    client: reqwest::Client,
+}
+
+impl SearxngSearchProvider {
+    pub fn new(base_url: String) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest client");
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            client,
+        }
+    }
+}
+
+#[async_trait]
+impl SearchProvider for SearxngSearchProvider {
+    async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        freshness: Option<Freshness>,
+    ) -> Result<Vec<WebSearchHit>, WebError> {
+        let category = if looks_like_news_query(query) {
+            "news"
+        } else {
+            "general"
+        };
+        let time_range = freshness
+            .map(|f| format!("&time_range={}", f.as_str()))
+            .unwrap_or_default();
+        let url = format!(
+            "{}/search?q={}&format=json&categories={category}{time_range}",
+            self.base_url,
+            urlencoding_lite(query)
+        );
+        let response = self
+            .client
+            .get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(upstream_error)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(WebError::Upstream(format!("searxng: HTTP {status}")));
+        }
+        let parsed: Value = response
+            .json()
+            .await
+            .map_err(|e| WebError::Upstream(format!("searxng: {e}")))?;
+        Ok(parse_searxng_results(&parsed, limit))
+    }
+}
+
+pub fn parse_searxng_results(parsed: &Value, limit: u32) -> Vec<WebSearchHit> {
+    let Some(Value::Array(items)) = parsed.get("results") else {
+        return Vec::new();
+    };
+    let mut hits: Vec<WebSearchHit> = items
+        .iter()
+        .filter_map(|item| {
+            let url = item.get("url").and_then(Value::as_str)?.to_string();
+            let title = item.get("title").and_then(Value::as_str).unwrap_or(&url);
+            Some(WebSearchHit {
+                title: title.to_string(),
+                url,
+                snippet: item
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                source: Some("searxng".into()),
+                published: item
+                    .get("publishedDate")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect();
+    hits.truncate(limit as usize);
+    hits
 }
 
 /// DuckDuckGo Instant Answer API — no API key.
@@ -258,25 +795,36 @@ impl Default for DuckDuckGoSearchProvider {
 
 #[async_trait]
 impl SearchProvider for DuckDuckGoSearchProvider {
-    async fn search(&self, query: &str, limit: u32) -> Result<Vec<WebSearchHit>, WebError> {
+    async fn search(
+        &self,
+        query: &str,
+        limit: u32,
+        freshness: Option<Freshness>,
+    ) -> Result<Vec<WebSearchHit>, WebError> {
         let mut hits = Vec::new();
-        if let Ok(body) = self
-            .fetch_text(&format!(
-                "https://api.duckduckgo.com/?q={}&format=json&no_html=1&skip_disambig=1",
-                urlencoding_lite(query)
-            ))
-            .await
-        {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&body) {
-                hits.extend(parse_duckduckgo_results(&parsed, limit));
+        // Instant Answers are encyclopedic and undated: useless for a time window.
+        if freshness.is_none() {
+            if let Ok(body) = self
+                .fetch_text(&format!(
+                    "https://api.duckduckgo.com/?q={}&format=json&no_html=1&skip_disambig=1",
+                    urlencoding_lite(query)
+                ))
+                .await
+            {
+                if let Ok(parsed) = serde_json::from_str::<Value>(&body) {
+                    hits.extend(parse_duckduckgo_results(&parsed, limit));
+                }
             }
         }
 
         if (hits.len() as u32) < limit {
             if let Ok(html) = self
                 .fetch_text(&format!(
-                    "https://html.duckduckgo.com/html/?q={}",
-                    urlencoding_lite(query)
+                    "https://html.duckduckgo.com/html/?q={}{}",
+                    urlencoding_lite(query),
+                    freshness
+                        .map(|f| format!("&df={}", &f.as_str()[..1]))
+                        .unwrap_or_default()
                 ))
                 .await
             {
@@ -284,7 +832,7 @@ impl SearchProvider for DuckDuckGoSearchProvider {
             }
         }
 
-        if (hits.len() as u32) < limit || looks_like_news_query(query) {
+        if (hits.len() as u32) < limit || looks_like_news_query(query) || freshness.is_some() {
             let (hl, gl, ceid) = if query
                 .chars()
                 .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c))
@@ -296,7 +844,11 @@ impl SearchProvider for DuckDuckGoSearchProvider {
             if let Ok(rss) = self
                 .fetch_text(&format!(
                     "https://news.google.com/rss/search?q={}&hl={hl}&gl={gl}&ceid={ceid}",
-                    urlencoding_lite(query)
+                    urlencoding_lite(&match freshness {
+                        // Google News search operator: only items from the window.
+                        Some(f) => format!("{query} when:{}", f.google_news_when()),
+                        None => query.to_string(),
+                    })
                 ))
                 .await
             {
@@ -336,7 +888,12 @@ pub struct StaticSearchProvider {
 
 #[async_trait]
 impl SearchProvider for StaticSearchProvider {
-    async fn search(&self, _query: &str, limit: u32) -> Result<Vec<WebSearchHit>, WebError> {
+    async fn search(
+        &self,
+        _query: &str,
+        limit: u32,
+        _freshness: Option<Freshness>,
+    ) -> Result<Vec<WebSearchHit>, WebError> {
         Ok(self.hits.iter().take(limit as usize).cloned().collect())
     }
 }
@@ -367,6 +924,7 @@ pub fn parse_duckduckgo_results(parsed: &Value, limit: u32) -> Vec<WebSearchHit>
             url: abstract_url.to_string(),
             snippet: abstract_text.to_string(),
             source: Some("duckduckgo".into()),
+            published: None,
         });
     }
     collect_ddg_topics(parsed.get("Results"), &mut hits);
@@ -387,6 +945,9 @@ pub fn looks_like_news_query(query: &str) -> bool {
         "today",
         "latest",
         "свеж",
+        "последн",
+        "актуальн",
+        "recent",
         "headline",
         "заголов",
     ]
@@ -414,6 +975,7 @@ pub fn parse_ddg_html(html: &str, limit: u32) -> Vec<WebSearchHit> {
                 url,
                 snippet: String::new(),
                 source: Some("duckduckgo".into()),
+                published: None,
             });
         }
         rest = &after[end..];
@@ -446,6 +1008,7 @@ pub fn parse_ddg_html(html: &str, limit: u32) -> Vec<WebSearchHit> {
                     url: href,
                     snippet: String::new(),
                     source: Some("duckduckgo".into()),
+                    published: None,
                 });
             }
             rest = &rest[marker + 1..];
@@ -491,6 +1054,7 @@ pub fn parse_rss_items(xml: &str, limit: u32, source: &str) -> Vec<WebSearchHit>
                 url: link,
                 snippet: strip_tags(&snippet),
                 source: Some(source.into()),
+                published: xml_tag(item, "pubDate"),
             });
         }
         rest = &after_item[item_end + 7..];
@@ -594,23 +1158,9 @@ fn collect_ddg_topics(value: Option<&Value>, hits: &mut Vec<WebSearchHit>) {
             url,
             snippet: text.to_string(),
             source: Some("duckduckgo".into()),
+            published: None,
         });
     }
-}
-
-fn first_html_title(html: &str) -> Option<String> {
-    let lower = html.to_ascii_lowercase();
-    let start = lower.find("<title")?;
-    let after = html.get(start..)?;
-    let gt = after.find('>')?;
-    let rest = after.get(gt + 1..)?;
-    let end = rest.to_ascii_lowercase().find("</title>")?;
-    let title = html_unescape(rest[..end].trim());
-    if title.is_empty() { None } else { Some(title) }
-}
-
-fn strip_tags_simple(s: &str) -> String {
-    strip_tags(s)
 }
 
 fn urlencoding_lite(s: &str) -> String {
@@ -681,6 +1231,7 @@ mod tests {
                 url: "https://docs.rs".into(),
                 snippet: "crates".into(),
                 source: Some("test".into()),
+                published: None,
             }],
         }));
         let result = gw
@@ -748,9 +1299,132 @@ mod tests {
     }
 
     #[test]
+    fn parse_brave_news_and_web() {
+        let news = serde_json::json!({ "results": [
+            { "title": "<strong>Bitcoin</strong> ETF", "url": "https://coindesk.com/a",
+              "description": "Flows <strong>up</strong>", "age": "2 hours ago" },
+            { "title": "no url" }
+        ]});
+        let hits = parse_brave_results(news.get("results"), "brave-news");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Bitcoin ETF");
+        assert_eq!(hits[0].snippet, "Flows up");
+        assert_eq!(hits[0].published.as_deref(), Some("2 hours ago"));
+
+        let web = serde_json::json!({ "web": { "results": [
+            { "title": "Docs", "url": "https://docs.rs/", "description": "", "page_age": "2026-10-01T00:00:00" }
+        ]}});
+        let hits = parse_brave_results(web.pointer("/web/results"), "brave");
+        assert_eq!(hits[0].published.as_deref(), Some("2026-10-01T00:00:00"));
+    }
+
+    #[test]
+    fn parse_searxng() {
+        let parsed = serde_json::json!({ "results": [
+            { "title": "ETH update", "url": "https://example.com/eth", "content": "Merge",
+              "publishedDate": "2026-10-04T10:00:00" },
+            { "title": "B", "url": "https://example.com/b" }
+        ]});
+        let hits = parse_searxng_results(&parsed, 1);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].snippet, "Merge");
+        assert_eq!(hits[0].published.as_deref(), Some("2026-10-04T10:00:00"));
+    }
+
+    #[tokio::test]
+    async fn chain_skips_failing_provider_and_tops_up() {
+        struct Failing;
+        #[async_trait]
+        impl SearchProvider for Failing {
+            async fn search(
+                &self,
+                _q: &str,
+                _l: u32,
+                _f: Option<Freshness>,
+            ) -> Result<Vec<WebSearchHit>, WebError> {
+                Err(WebError::Upstream("bad key".into()))
+            }
+        }
+        let hit = |u: &str| WebSearchHit {
+            title: u.into(),
+            url: u.into(),
+            snippet: String::new(),
+            source: None,
+            published: None,
+        };
+        let chain = ChainSearchProvider {
+            providers: vec![
+                Arc::new(Failing),
+                Arc::new(StaticSearchProvider { hits: vec![hit("https://a"), hit("https://b")] }),
+                Arc::new(StaticSearchProvider { hits: vec![hit("https://b"), hit("https://c")] }),
+            ],
+        };
+        let urls: Vec<String> = chain.search("x", 3, None).await.unwrap().into_iter().map(|h| h.url).collect();
+        assert_eq!(urls, vec!["https://a", "https://b", "https://c"]);
+
+        let only_failing = ChainSearchProvider { providers: vec![Arc::new(Failing)] };
+        assert!(only_failing.search("x", 3, None).await.is_err());
+    }
+
+    #[test]
+    fn parses_retry_after() {
+        let now = DateTime::parse_from_rfc3339("2026-10-05T12:00:00Z").unwrap().with_timezone(&Utc);
+        assert_eq!(parse_retry_after("120", now), Some(120));
+        assert_eq!(parse_retry_after("Mon, 05 Oct 2026 12:00:30 GMT", now), Some(30));
+        assert_eq!(parse_retry_after("Mon, 05 Oct 2026 11:00:00 GMT", now), Some(0));
+        assert_eq!(parse_retry_after("soon", now), None);
+    }
+
+    #[test]
+    fn parses_provider_dates() {
+        let now = DateTime::parse_from_rfc3339("2026-10-05T12:00:00Z").unwrap().with_timezone(&Utc);
+        let iso = |s: &str| parse_published(s, now).map(|d| d.to_rfc3339());
+        assert_eq!(iso("Sun, 04 Oct 2026 08:30:00 GMT").unwrap(), "2026-10-04T08:30:00+00:00");
+        assert_eq!(iso("2026-10-01T10:00:00").unwrap(), "2026-10-01T10:00:00+00:00");
+        assert_eq!(iso("2026-09-30T10:00:00+03:00").unwrap(), "2026-09-30T07:00:00+00:00");
+        assert_eq!(iso("2026-01-15").unwrap(), "2026-01-15T00:00:00+00:00");
+        assert_eq!(iso("3 hours ago").unwrap(), "2026-10-05T09:00:00+00:00");
+        assert_eq!(iso("2 days ago").unwrap(), "2026-10-03T12:00:00+00:00");
+        assert!(iso("someday").is_none());
+    }
+
+    #[test]
+    fn freshness_drops_old_and_sorts_newest_first() {
+        let now = DateTime::parse_from_rfc3339("2026-10-05T12:00:00Z").unwrap().with_timezone(&Utc);
+        let hit = |url: &str, published: Option<&str>| WebSearchHit {
+            title: url.into(),
+            url: url.into(),
+            snippet: String::new(),
+            source: None,
+            published: published.map(str::to_string),
+        };
+        let hits = vec![
+            hit("https://jan", Some("Thu, 15 Jan 2026 10:00:00 GMT")),
+            hit("https://undated", None),
+            hit("https://older", Some("2026-10-01T10:00:00")),
+            hit("https://newest", Some("5 hours ago")),
+        ];
+        let week: Vec<String> = apply_freshness(hits.clone(), Some(Freshness::Week), now)
+            .into_iter()
+            .map(|h| h.url)
+            .collect();
+        assert_eq!(week, vec!["https://newest", "https://older", "https://undated"]);
+
+        let any = apply_freshness(hits, None, now);
+        assert_eq!(any.len(), 4);
+        assert_eq!(any[0].published.as_deref(), Some("2026-01-15T10:00:00Z"));
+        assert_eq!(Freshness::parse("7d"), Some(Freshness::Week));
+        assert_eq!(Freshness::Week.wider(), Some(Freshness::Month));
+    }
+
+    #[test]
     fn news_query_detection() {
         assert!(looks_like_news_query("новости ИИ на сегодня"));
         assert!(looks_like_news_query("AI news today"));
         assert!(!looks_like_news_query("what is sqlite"));
     }
 }
+
+
+
+

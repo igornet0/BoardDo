@@ -20,7 +20,9 @@ SBDO → create → save → run → SmartDo execute → WebSocket events → de
 │   ├── shared/         # Domain contract (Workflow, Execution, …)
 │   └── boarddo-telegram/
 │       ├── …           # BoardDo product: SQLite, audit, trigger match
-│       └── gram_api/   # git submodule → https://github.com/igornet0/gram_api
+│       └── gram_api/   # git submodule → igornet0/gram_api, branch `tglib`
+├── vendor/
+│   └── RustBrowser/    # git submodule → igornet0/RustBrowser (optional, `make browser`)
 └── SBDO/               # React canvas editor
 ```
 
@@ -57,6 +59,43 @@ Env (optional):
 - `BOARDDO_DATA_DIR=data` (per-account TDLib/mock session directories)
 - `BOARDDO_TELEGRAM_CONFIG` (optional path to `telegram.toml`)
 - `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` — **developer override only** (never logged)
+- `BRAVE_SEARCH_API_KEY` — Brave Search API for `web.search` (direct publisher links, news index)
+- `SEARXNG_URL` — self-hosted SearXNG for `web.search` (`json` must be in `search.formats`)
+- Headless browser for JavaScript-rendered pages (`render: auto | browser` in `web.open` /
+  `web.search`) — [RustBrowser](https://github.com/igornet0/RustBrowser) (Servo), bundled as the
+  `vendor/RustBrowser` submodule:
+
+  ```bash
+  make browser          # once: builds rust-browser into ~/.cache/boarddo/rust-browser (long, Servo)
+  make dev              # BoardDo starts the browser on the first render, stops it when idle
+  make browser-status   # built? running? (GET /api/browser/status)
+  ```
+
+  BoardDo runs it on `127.0.0.1` with a random port and token, one process for all boards and
+  agents; it exits with BoardDo (stdin pipe) and after `BROWSER_IDLE_SECS` (600) without renders.
+  Settings: `BROWSER_BIN` (binary path), `BROWSER_MAX_TABS` (4), `BROWSER_LOG` (`warn`),
+  `BROWSER_AUTOMATION=off` (disable), or an external server instead:
+  `BROWSER_AUTOMATION_URL` / `BROWSER_AUTOMATION_TOKEN`. The build lives outside the repo because
+  Servo's C build scripts reject paths with spaces (`BROWSER_TARGET_DIR` to change it).
+  macOS / Linux only (Unix-socket IPC).
+
+  `auto` keeps plain HTTP and switches to the browser only for JavaScript shells
+  (or when browser options such as `wait_for`, `wait_js`, `network_idle_ms`, `script`,
+  `screenshot`, `capture_network` are set). 403/429 responses are not retried in the browser.
+
+Web research pipeline (`web.open`, `web.extract`):
+
+- structured data first: JSON-LD, OpenGraph/meta, microdata, tables, embedded app state
+  (`__NEXT_DATA__`, `window.__INITIAL_STATE__`, …) — often enough without a browser;
+- browser network capture (`capture_network`): fetch/XHR log + JSON responses →
+  `api_candidates` (optionally `fetch_api` GETs endpoints the page hook missed);
+- every page has `provenance` (url, method, fetched_at, `sha256` content hash), every
+  extracted value has `evidence` (source url, method, selector / JSON path / quote);
+- access problems are reported, not bypassed: `blocked` (401/403/451), `rate_limited`
+  (429, `Retry-After` honoured up to 10 s, 2 retries), `challenge` (bot-check pages),
+  `not_found`, `unavailable`;
+- `web.extract` asks the model for fields with a source id + JSON path or exact quote and
+  re-checks each value; unverifiable values are listed in `unverified` (dropped with `strict`).
 
 Default Telegram user stack uses `MockTelegramClient` (no `tdjson`). CI and DoD tests stay on that mock.
 

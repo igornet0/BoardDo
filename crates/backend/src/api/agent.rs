@@ -479,7 +479,7 @@ Allowed ops:
 Use only these type_id values:
 trigger.manual, trigger.webhook, trigger.schedule, trigger.telegram.user.message_received,
 logic.condition, logic.delay, data.set, data.transform, http.request, debug.log,
-ai.chat, ai.classify, ai.analyze, ai.image, ai.audio, ai.video, web.search, web.fetch,
+ai.chat, ai.classify, ai.analyze, ai.image, ai.audio, ai.video, web.search, web.open, web.extract, web.fetch,
 telegram.send_message, telegram.send_photo, telegram.send_document,
 telegram.user.send_message, telegram.user.forward_message, telegram.user.edit_message, telegram.user.delete_messages.
 
@@ -487,6 +487,9 @@ Config notes:
 - Expressions use {{trigger.text}}, {{nodes.<id>.output.*}}, {{variables.*}}
 - Condition nodes may use source_port "true" / "false" on outgoing edges
 - AI / Telegram / HTTP nodes take connection_id as a string (leave empty if unknown)
+- web.search: query, limit, read_pages (0-10, how many found pages to read), freshness (auto|day|week|month|year|any; auto = week for news), render (auto|http|browser); output.context is a digest with today's date, period, publication dates and page texts for LLM prompts
+- web.open: url (string, list, or {{{{nodes.search.output.results}}}}), max_chars, selector (CSS), fields ("name: css" lines, "css@attr", "css[]" for all), render (auto|http|browser), structured (JSON-LD/meta/microdata/tables/embedded JSON → output.structured), browser-only: wait_for (CSS), wait_text, wait_js, network_idle_ms, wait_ms, script (JS → output.script_result), screenshot (→ output.screenshot media URI), capture_network (→ output.api_candidates with JSON), fetch_api; output.text / output.data / output.evidence / output.provenance / output.render; failed pages carry status blocked|rate_limited|not_found|challenge and retryable
+- web.extract: connection_id, model, url, instruction ("product name, price, availability"), schema ("name: description" lines), render, capture_network, strict; output.data, output.evidence (value, verified, source url/method/json_path/quote), output.unverified
 - ai.image modes: generate | edit; ai.audio modes: tts | transcribe; ai.video: prompt (+ optional image)
 - Prefer updating existing selected nodes over creating duplicates
 - If the user only asks a question, return ops: []

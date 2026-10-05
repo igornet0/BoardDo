@@ -11,6 +11,7 @@ mod telegram_user;
 mod transform;
 mod trigger;
 mod web;
+mod web_extract;
 
 pub use ai::{AiAnalyzeNode, AiAudioNode, AiChatNode, AiClassifyNode, AiImageNode, AiVideoNode};
 pub use condition::ConditionNode;
@@ -27,4 +28,5 @@ pub use telegram_user::{
 };
 pub use transform::TransformNode;
 pub use trigger::{ManualTrigger, ScheduleTrigger, WebhookTrigger};
-pub use web::{WebFetchNode, WebSearchNode};
+pub use web::{WebFetchNode, WebOpenNode, WebSearchNode};
+pub use web_extract::WebExtractNode;

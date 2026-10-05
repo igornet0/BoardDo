@@ -237,6 +237,8 @@ export const TYPE_IDS = {
   AI_AUDIO: 'ai.audio',
   AI_VIDEO: 'ai.video',
   WEB_SEARCH: 'web.search',
+  WEB_OPEN: 'web.open',
+  WEB_EXTRACT: 'web.extract',
   WEB_FETCH: 'web.fetch',
 } as const
 

@@ -392,6 +392,9 @@ export const BUILTIN_SCENARIOS: ScenarioTemplate[] = [
           config: {
             query: '{{nodes.classify.output.query}}',
             limit: 8,
+            read_pages: 3,
+            page_chars: 3000,
+            freshness: 'auto',
           },
         },
         {
@@ -403,9 +406,9 @@ export const BUILTIN_SCENARIOS: ScenarioTemplate[] = [
             connection_id: '',
             model: 'gpt-4o-mini',
             system:
-              'Answer using the search results. Cite URLs when you use them. If results are thin, say so.',
+              'Answer using the page texts from the sources. Cite URLs when you use them. If sources are thin, say so. The sources start with today\'s date and the search period: state today\'s date, give the publication date of every news item, and skip items published outside the period.',
             prompt:
-              'Question: {{trigger.text}}\n\nSearch results:\n{{nodes.search.output.results}}',
+              'Question: {{trigger.text}}\n\nSources (page text):\n{{nodes.search.output.context}}',
             strip_prefix: '',
             temperature: 0.2,
             max_tokens: 1024,
@@ -509,6 +512,9 @@ export const BUILTIN_SCENARIOS: ScenarioTemplate[] = [
           config: {
             query: '{{nodes.classify.output.query}}',
             limit: 8,
+            read_pages: 3,
+            page_chars: 3000,
+            freshness: 'auto',
           },
         },
         {
@@ -520,9 +526,9 @@ export const BUILTIN_SCENARIOS: ScenarioTemplate[] = [
             connection_id: '',
             model: 'gpt-4o-mini',
             system:
-              'Answer using the search results. Cite URLs when you use them. Keep it short for Telegram.',
+              'Answer using the page texts from the sources. Cite URLs when you use them. Keep it short for Telegram. The sources start with today\'s date and the search period: state today\'s date, give the publication date of every news item, and skip items published outside the period.',
             prompt:
-              'Question: {{trigger.text}}\n\nSearch results:\n{{nodes.search.output.results}}',
+              'Question: {{trigger.text}}\n\nSources (page text):\n{{nodes.search.output.context}}',
             strip_prefix: '',
             temperature: 0.2,
             max_tokens: 800,

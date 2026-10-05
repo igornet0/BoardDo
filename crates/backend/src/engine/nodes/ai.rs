@@ -29,7 +29,9 @@ const DEFAULT_CLASSIFY_SYSTEM: &str = "You classify whether a user question need
 Reply with a JSON object only, no markdown:\n\
 {\"label\":\"needs_web_search|knowledge\",\"needs_web_search\":true|false,\"query\":\"search query\",\"confidence\":0.0}\n\
 Set needs_web_search true when the question needs current facts, prices, news, documentation, comparisons, or anything that may have changed after your knowledge cutoff.\n\
-query is a concise web search query (or the original question if it is already specific).";
+query is a concise web search query (or the original question if it is already specific).\n\
+Never put a year or date into query unless the user asked for that period: for latest / recent news \
+omit dates entirely (search freshness is applied separately).";
 
 #[async_trait]
 impl NodeHandler for AiChatNode {
@@ -120,6 +122,11 @@ impl NodeHandler for AiClassifyNode {
                 system.push_str("\nAllowed labels: ");
                 system.push_str(&labels.join(", "));
             }
+            // Without the date the model assumes its training-time "now" and searches the past.
+            system.push_str(&format!(
+                "\nToday is {}.",
+                chrono::Local::now().format("%Y-%m-%d (%A)")
+            ));
         }
 
         let timeout_ms = timeout_ms(node);
@@ -195,7 +202,7 @@ impl NodeHandler for AiAnalyzeNode {
     }
 }
 
-async fn openai_from_ctx(
+pub(super) async fn openai_from_ctx(
     ctx: &ExecutionContext,
     node: &Node,
     kind: &str,
@@ -252,7 +259,7 @@ async fn openai_from_ctx_full(
     ))
 }
 
-fn resolve_model(
+pub(super) fn resolve_model(
     node: &Node,
     ctx: &ExecutionContext,
     endpoint: &OpenAiEndpoint,
@@ -604,7 +611,7 @@ fn json_truthy(v: &Value) -> Option<bool> {
     }
 }
 
-fn extract_json_object(raw: &str) -> Option<Value> {
+pub(super) fn extract_json_object(raw: &str) -> Option<Value> {
     let start = raw.find('{')?;
     let end = raw.rfind('}')?;
     if end <= start {

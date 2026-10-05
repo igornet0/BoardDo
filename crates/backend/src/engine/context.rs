@@ -8,6 +8,7 @@ use boarddo_shared::WorkflowDefinition;
 use crate::connections::ConnectionProvider;
 use crate::engine::node_state::{NodeStateStore, NullNodeStateStore};
 use crate::integrations::media::MediaStore;
+use crate::integrations::browser::{BrowserRenderer, NullBrowserRenderer};
 use crate::integrations::web::{NullWebGateway, WebGateway};
 use crate::tools::service::{CustomToolGateway, NullCustomToolGateway};
 use boarddo_telegram::{NullTelegramUserGateway, TelegramUserGateway};
@@ -28,6 +29,8 @@ pub struct ExecutionContext {
     pub connections: Arc<dyn ConnectionProvider>,
     pub telegram_user: Arc<dyn TelegramUserGateway>,
     pub web: Arc<dyn WebGateway>,
+    /// Headless browser for JavaScript-rendered pages (RustBrowser automation server).
+    pub browser: Arc<dyn BrowserRenderer>,
     pub node_state: Arc<dyn NodeStateStore>,
     pub custom_tools: Arc<dyn CustomToolGateway>,
     pub media: MediaStore,
@@ -75,6 +78,7 @@ impl ExecutionContext {
             connections: Arc::new(crate::connections::NullConnectionProvider),
             telegram_user: Arc::new(NullTelegramUserGateway),
             web: Arc::new(NullWebGateway),
+            browser: Arc::new(NullBrowserRenderer),
             node_state: Arc::new(NullNodeStateStore),
             custom_tools: Arc::new(NullCustomToolGateway),
             media: MediaStore::new(
@@ -100,6 +104,11 @@ impl ExecutionContext {
 
     pub fn with_web(mut self, web: Arc<dyn WebGateway>) -> Self {
         self.web = web;
+        self
+    }
+
+    pub fn with_browser(mut self, browser: Arc<dyn BrowserRenderer>) -> Self {
+        self.browser = browser;
         self
     }
 

@@ -89,6 +89,8 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(telegram))
         .await?;
+    // A BoardDo-managed RustBrowser goes down with us (it also exits on stdin EOF).
+    crate::integrations::browser::shared().shutdown().await;
 
     Ok(())
 }

@@ -41,6 +41,8 @@ Telegram outreach requires approval. Record what worked and pivot away from weak
             .into(),
         tools: vec![
             tool("web.search", "Web Search"),
+            tool("web.open", "Read Page"),
+            tool("web.extract", "Extract Data"),
             tool("web.fetch", "Web Fetch"),
             tool("ai.chat", "AI Chat"),
             tool("ai.analyze", "AI Analyze"),
@@ -99,6 +101,8 @@ note contradictions, and keep a durable research memory. Do not send messages."
             .into(),
         tools: vec![
             tool("web.search", "Web Search"),
+            tool("web.open", "Read Page"),
+            tool("web.extract", "Extract Data"),
             tool("web.fetch", "Web Fetch"),
             tool("ai.analyze", "AI Analyze"),
             tool("ai.chat", "AI Chat"),
@@ -153,6 +157,8 @@ Only record a change when something actually moved. Summarize impact."
             .into(),
         tools: vec![
             tool("web.search", "Web Search"),
+            tool("web.open", "Read Page"),
+            tool("web.extract", "Extract Data"),
             tool("web.fetch", "Web Fetch"),
             tool("github.get_latest_release", "GitHub Release"),
             tool("http.request", "HTTP"),
@@ -224,6 +230,8 @@ Prefer specializing an existing seed graph over inventing a huge canvas."
             tool("workflow.list_executions", "List executions"),
             tool("scenario.apply_ops", "Apply graph ops"),
             tool("web.search", "Web Search"),
+            tool("web.open", "Read Page"),
+            tool("web.extract", "Extract Data"),
             tool("web.fetch", "Web Fetch"),
             tool("ai.chat", "AI Chat"),
             tool("ai.analyze", "AI Analyze"),
@@ -287,6 +295,8 @@ Never spend money. Never spam. Level-2 autonomy requires approval before Telegra
             .into(),
         tools: vec![
             tool("web.search", "Web Search"),
+            tool("web.open", "Read Page"),
+            tool("web.extract", "Extract Data"),
             tool("web.fetch", "Web Fetch"),
             tool("research.search", "Research Search"),
             tool("research.fetch", "Research Fetch"),

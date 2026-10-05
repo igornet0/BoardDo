@@ -68,7 +68,7 @@ impl NodeRegistry {
             GitHubGetLatestRelease, HttpRequestNode, LogNode, ManualTrigger, ScheduleTrigger,
             SetDataNode, TelegramSendDocument, TelegramSendMessage, TelegramSendPhoto,
             TelegramUserDeleteMessages, TelegramUserEditMessage, TelegramUserForwardMessage,
-            TelegramUserMessageReceived, TelegramUserSendMessage, TransformNode, WebFetchNode,
+            TelegramUserMessageReceived, TelegramUserSendMessage, TransformNode, WebExtractNode, WebFetchNode, WebOpenNode,
             WebSearchNode, WebhookTrigger,
         };
 
@@ -91,6 +91,8 @@ impl NodeRegistry {
         registry.register(Arc::new(AiVideoNode));
         registry.register(Arc::new(WebSearchNode));
         registry.register(Arc::new(WebFetchNode));
+        registry.register(Arc::new(WebOpenNode));
+        registry.register(Arc::new(WebExtractNode));
         registry.register(Arc::new(GitHubGetLatestRelease));
         registry.register(Arc::new(TelegramSendMessage));
         registry.register(Arc::new(TelegramSendPhoto));

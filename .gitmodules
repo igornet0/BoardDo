@@ -1,3 +1,7 @@
 [submodule "gram_api"]
 	path = crates/boarddo-telegram/gram_api
 	url = https://github.com/igornet0/gram_api.git
+	branch = tglib
+[submodule "RustBrowser"]
+	path = vendor/RustBrowser
+	url = https://github.com/igornet0/RustBrowser.git

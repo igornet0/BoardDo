@@ -102,7 +102,12 @@ export function QuerySandbox({
             </div>
           )}
           <div>
-            <h4>{t('sandbox.search')}</h4>
+            <h4>
+              {t('sandbox.search')}
+              {typeof search?.pages_read === 'number' && search.pages_read > 0
+                ? ` · ${t('sandbox.pagesRead', { count: search.pages_read })}`
+                : ''}
+            </h4>
             {results.length === 0 ? (
               <p className="sandbox__muted">{t('sandbox.noHits')}</p>
             ) : (

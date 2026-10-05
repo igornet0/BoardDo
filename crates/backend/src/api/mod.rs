@@ -1,4 +1,5 @@
 mod agent;
+mod browser;
 mod connections;
 mod executions;
 mod goals;
@@ -28,6 +29,8 @@ pub fn router(state: SharedState) -> Router {
 
     Router::new()
         .route("/api/health", get(health::health))
+        .route("/api/browser/status", get(browser::status))
+        .route("/api/browser/stop", post(browser::stop))
         .route(
             "/api/workflows",
             get(workflows::list).post(workflows::create),

@@ -1353,6 +1353,10 @@ export function NodeConfigForm({
       return <AiVideoForm {...props} />
     case TYPE_IDS.WEB_SEARCH:
       return <WebSearchForm {...props} />
+    case TYPE_IDS.WEB_OPEN:
+      return <WebOpenForm {...props} />
+    case TYPE_IDS.WEB_EXTRACT:
+      return <WebExtractForm {...props} />
     case TYPE_IDS.WEB_FETCH:
       return <HttpForm {...props} />
     case TYPE_IDS.GITHUB_GET_LATEST_RELEASE:
@@ -1744,6 +1748,281 @@ function WebSearchForm({ config, onChange }: FormProps) {
           onChange={(e) => onChange({ ...config, limit: Number(e.target.value) })}
         />
       </Field>
+      <Field label={t('editor.webSearch.freshness')} hint={t('editor.webSearch.freshnessHint')}>
+        <select
+          value={asString(config.freshness, 'auto')}
+          onChange={(e) => onChange({ ...config, freshness: e.target.value })}
+        >
+          <option value="auto">{t('editor.webSearch.freshness.auto')}</option>
+          <option value="day">{t('editor.webSearch.freshness.day')}</option>
+          <option value="week">{t('editor.webSearch.freshness.week')}</option>
+          <option value="month">{t('editor.webSearch.freshness.month')}</option>
+          <option value="year">{t('editor.webSearch.freshness.year')}</option>
+          <option value="any">{t('editor.webSearch.freshness.any')}</option>
+        </select>
+      </Field>
+      <Field label={t('editor.web.render')} hint={t('editor.web.renderHint')}>
+        <select
+          value={asString(config.render, 'auto')}
+          onChange={(e) => onChange({ ...config, render: e.target.value })}
+        >
+          <option value="auto">{t('editor.web.render.auto')}</option>
+          <option value="http">{t('editor.web.render.http')}</option>
+          <option value="browser">{t('editor.web.render.browser')}</option>
+        </select>
+      </Field>
+      <Field label={t('editor.webSearch.readPages')} hint={t('editor.webSearch.readPagesHint')}>
+        <input
+          type="number"
+          min="0"
+          max="10"
+          value={asNumber(config.read_pages, 3)}
+          onChange={(e) => onChange({ ...config, read_pages: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={t('editor.webSearch.pageChars')}>
+        <input
+          type="number"
+          min="200"
+          max="20000"
+          step="500"
+          value={asNumber(config.page_chars, 3000)}
+          onChange={(e) => onChange({ ...config, page_chars: Number(e.target.value) })}
+        />
+      </Field>
+    </>
+  )
+}
+
+function fieldsToText(v: unknown): string {
+  if (typeof v === 'string') return v
+  return Object.entries(asObject(v))
+    .map(([name, selector]) => `${name}: ${asString(selector)}`)
+    .join('\n')
+}
+
+function WebOpenForm({ config, onChange }: FormProps) {
+  const { t } = usePreferences()
+  return (
+    <>
+      <InfoBlock>{t('editor.webOpen.help')}</InfoBlock>
+      <Field label={t('editor.webOpen.url')} hint={t('editor.webOpen.urlHint')}>
+        <textarea
+          rows={2}
+          value={asString(config.url)}
+          onChange={(e) => onChange({ ...config, url: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.limit')}>
+        <input
+          type="number"
+          min="1"
+          max="10"
+          value={asNumber(config.limit, 5)}
+          onChange={(e) => onChange({ ...config, limit: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.maxChars')}>
+        <input
+          type="number"
+          min="200"
+          max="100000"
+          step="1000"
+          value={asNumber(config.max_chars, 8000)}
+          onChange={(e) => onChange({ ...config, max_chars: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.selector')} hint={t('editor.webOpen.selectorHint')}>
+        <input
+          value={asString(config.selector)}
+          placeholder="article, .post-body"
+          onChange={(e) => onChange({ ...config, selector: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.fields')} hint={t('editor.webOpen.fieldsHint')}>
+        <textarea
+          rows={4}
+          value={fieldsToText(config.fields)}
+          placeholder={'price: .price\nimages: img@src[]'}
+          onChange={(e) => onChange({ ...config, fields: e.target.value })}
+        />
+      </Field>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.include_links !== false}
+          onChange={(e) => onChange({ ...config, include_links: e.target.checked })}
+        />
+        {t('editor.webOpen.includeLinks')}
+      </label>
+      <Field label={t('editor.web.render')} hint={t('editor.web.renderHint')}>
+        <select
+          value={asString(config.render, 'auto')}
+          onChange={(e) => onChange({ ...config, render: e.target.value })}
+        >
+          <option value="auto">{t('editor.web.render.auto')}</option>
+          <option value="http">{t('editor.web.render.http')}</option>
+          <option value="browser">{t('editor.web.render.browser')}</option>
+        </select>
+      </Field>
+      <Field label={t('editor.webOpen.waitFor')} hint={t('editor.webOpen.waitForHint')}>
+        <input
+          value={asString(config.wait_for)}
+          placeholder=".article-body"
+          onChange={(e) => onChange({ ...config, wait_for: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.waitText')}>
+        <input
+          value={asString(config.wait_text)}
+          onChange={(e) => onChange({ ...config, wait_text: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.waitJs')} hint={t('editor.webOpen.waitJsHint')}>
+        <input
+          value={asString(config.wait_js)}
+          placeholder="document.querySelectorAll('.item').length > 10"
+          onChange={(e) => onChange({ ...config, wait_js: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.networkIdle')} hint={t('editor.webOpen.networkIdleHint')}>
+        <input
+          type="number"
+          min="0"
+          max="10000"
+          step="250"
+          value={asNumber(config.network_idle_ms, 0)}
+          onChange={(e) => onChange({ ...config, network_idle_ms: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.waitMs')}>
+        <input
+          type="number"
+          min="0"
+          max="30000"
+          step="250"
+          value={asNumber(config.wait_ms, 500)}
+          onChange={(e) => onChange({ ...config, wait_ms: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.script')} hint={t('editor.webOpen.scriptHint')}>
+        <textarea
+          rows={4}
+          value={asString(config.script)}
+          placeholder={"[...document.querySelectorAll('.price')].map(e => e.textContent)"}
+          onChange={(e) => onChange({ ...config, script: e.target.value })}
+        />
+      </Field>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.screenshot === true}
+          onChange={(e) => onChange({ ...config, screenshot: e.target.checked })}
+        />
+        {t('editor.webOpen.screenshot')}
+      </label>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.capture_network === true}
+          onChange={(e) => onChange({ ...config, capture_network: e.target.checked })}
+        />
+        {t('editor.webOpen.captureNetwork')}
+      </label>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.fetch_api === true}
+          onChange={(e) => onChange({ ...config, fetch_api: e.target.checked })}
+        />
+        {t('editor.webOpen.fetchApi')}
+      </label>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.structured !== false}
+          onChange={(e) => onChange({ ...config, structured: e.target.checked })}
+        />
+        {t('editor.webOpen.structured')}
+      </label>
+    </>
+  )
+}
+
+function WebExtractForm({ config, onChange, connections }: FormProps) {
+  const { t } = usePreferences()
+  return (
+    <>
+      <InfoBlock>{t('editor.webExtract.help')}</InfoBlock>
+      <ConnectionField
+        config={config}
+        onChange={onChange}
+        connections={connections}
+        type="openai"
+      />
+      <ModelSelectField
+        config={config}
+        onChange={onChange}
+        connections={connections}
+        capability="chat"
+      />
+      <Field label={t('editor.webOpen.url')} hint={t('editor.webOpen.urlHint')}>
+        <textarea
+          rows={2}
+          value={asString(config.url)}
+          onChange={(e) => onChange({ ...config, url: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webExtract.instruction')} hint={t('editor.exprHint')}>
+        <textarea
+          rows={3}
+          value={asString(config.instruction)}
+          onChange={(e) => onChange({ ...config, instruction: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webExtract.schema')} hint={t('editor.webExtract.schemaHint')}>
+        <textarea
+          rows={4}
+          value={fieldsToText(config.schema)}
+          placeholder={'name: название\nprice: цена'}
+          onChange={(e) => onChange({ ...config, schema: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.webOpen.limit')}>
+        <input
+          type="number"
+          min="1"
+          max="5"
+          value={asNumber(config.limit, 3)}
+          onChange={(e) => onChange({ ...config, limit: Number(e.target.value) })}
+        />
+      </Field>
+      <Field label={t('editor.web.render')} hint={t('editor.web.renderHint')}>
+        <select
+          value={asString(config.render, 'auto')}
+          onChange={(e) => onChange({ ...config, render: e.target.value })}
+        >
+          <option value="auto">{t('editor.web.render.auto')}</option>
+          <option value="http">{t('editor.web.render.http')}</option>
+          <option value="browser">{t('editor.web.render.browser')}</option>
+        </select>
+      </Field>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.capture_network === true}
+          onChange={(e) => onChange({ ...config, capture_network: e.target.checked })}
+        />
+        {t('editor.webOpen.captureNetwork')}
+      </label>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.strict === true}
+          onChange={(e) => onChange({ ...config, strict: e.target.checked })}
+        />
+        {t('editor.webExtract.strict')}
+      </label>
     </>
   )
 }

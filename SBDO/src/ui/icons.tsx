@@ -568,6 +568,10 @@ export function IconForType({
       return <IconSparkle size={size} />
     case TYPE_IDS.WEB_SEARCH:
       return <IconSearch size={size} />
+    case TYPE_IDS.WEB_OPEN:
+      return <IconExternal size={size} />
+    case TYPE_IDS.WEB_EXTRACT:
+      return <IconBraces size={size} />
     case TYPE_IDS.DEBUG_LOG:
       return <IconLog size={size} />
     case TYPE_IDS.TELEGRAM_SEND_MESSAGE:

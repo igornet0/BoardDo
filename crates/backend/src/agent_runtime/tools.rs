@@ -168,8 +168,9 @@ impl ToolGateway {
             gw
         })
         .with_web(std::sync::Arc::new(
-            crate::integrations::web::HttpWebGateway::duckduckgo(),
+            crate::integrations::web::HttpWebGateway::from_env(),
         ))
+        .with_browser(crate::integrations::browser::shared())
         .with_custom_tools(state.custom_tools.clone());
 
         let NodeOutput { data, .. } = handler.execute(&node, &mut ctx).await?;
@@ -828,10 +829,10 @@ async fn marketing_research(
             let gateway = ToolGateway::new();
             let call = PlannedToolCall {
                 id: "research-fetch-inner".into(),
-                type_id: "web.fetch".into(),
-                config: json!({ "url": url }),
+                type_id: "web.open".into(),
+                config: json!({ "url": url, "max_chars": 4000, "include_links": false }),
             };
-            let fetched = gateway.execute_node(state, spec, run, &call, "web.fetch").await?;
+            let fetched = gateway.execute_node(state, spec, run, &call, "web.open").await?;
             let title = fetched
                 .get("title")
                 .and_then(Value::as_str)
@@ -843,7 +844,7 @@ async fn marketing_research(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .chars()
-                .take(500)
+                .take(2000)
                 .collect::<String>();
             let note = ResearchNote {
                 id: Uuid::now_v7(),

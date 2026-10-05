@@ -3,12 +3,18 @@
 #   make            — список команд
 #   make setup      — подмодули + зависимости (npm + cargo)
 #   make dev        — backend + frontend одной командой (Ctrl+C останавливает оба)
+#   make browser    — собрать RustBrowser (Servo) для чтения JS-страниц (опционально, долго)
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
 FRONTEND_DIR  := SBDO
+BROWSER_DIR   := vendor/RustBrowser
+# Servo's C/C++ build scripts (jemalloc, mozjs) fail on paths with spaces, so the
+# browser builds outside the repo. BoardDo looks for the binary here too.
+BROWSER_TARGET_DIR ?= $(HOME)/.cache/boarddo/rust-browser
+BROWSER_BIN   := $(BROWSER_TARGET_DIR)/release/rust-browser
 BACKEND_PKG   := smartdo
 CARGO         ?= cargo
 NPM           ?= npm
@@ -37,7 +43,7 @@ help: ## Показать доступные команды
 setup: submodules install ## Подмодули + все зависимости
 
 .PHONY: submodules
-submodules: ## Инициализировать git-подмодули (gram_api)
+submodules: ## Инициализировать git-подмодули (gram_api, RustBrowser)
 	git submodule update --init --recursive
 
 .PHONY: install
@@ -144,6 +150,19 @@ ci: check lint test build-frontend ## Полный прогон как в CI
 .PHONY: ports
 ports: ## Показать, кто занимает порты backend/frontend
 	@lsof -nP -iTCP:$(lastword $(subst :, ,$(LISTEN_ADDR))) -iTCP:$(FRONTEND_PORT) -sTCP:LISTEN || echo "Порты свободны"
+
+##@ Браузер (RustBrowser / Servo)
+
+.PHONY: browser
+browser: ## Собрать RustBrowser (release) — BoardDo запустит его сам, когда понадобится
+	@test -f $(BROWSER_DIR)/Cargo.toml || git submodule update --init $(BROWSER_DIR)
+	cd $(BROWSER_DIR) && CARGO_TARGET_DIR="$(BROWSER_TARGET_DIR)" $(CARGO) build --release -p browser-app
+	@echo "Готово: $(BROWSER_BIN)"
+
+.PHONY: browser-status
+browser-status: ## Собран ли RustBrowser и запущен ли он backend-ом
+	@test -x $(BROWSER_BIN) && echo "Собран: $(BROWSER_BIN)" || echo "Не собран — make browser"
+	@curl -fsS http://$(LISTEN_ADDR)/api/browser/status 2>/dev/null || echo "(backend не запущен)"
 
 .PHONY: clean
 clean: ## Удалить артефакты сборки (target, SBDO/dist)
