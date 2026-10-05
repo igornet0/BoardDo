@@ -1,0 +1,18 @@
+# BoardDo Telegram application credentials
+#
+# Copy to config/telegram.toml and fill with credentials from an application
+# registered for BoardDo at https://my.telegram.org
+#
+# Do NOT copy api_id / api_hash from Telegram Desktop or any other client.
+# These identify the BoardDo app, not a user account.
+#
+# After the first successful start, api_hash is copied into encrypted secret
+# storage and (on macOS) the OS Keychain. Remove api_hash from this file.
+#
+# Developers may instead export TELEGRAM_API_ID / TELEGRAM_API_HASH for a
+# one-off override. Users should never need those variables.
+
+[telegram]
+api_id = 0
+# api_hash = ""
+# use_test_dc = false

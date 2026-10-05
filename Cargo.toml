@@ -1,0 +1,102 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/backend",
+    "crates/shared",
+    "crates/boarddo-telegram",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["BoardDo Team"]
+
+[workspace.dependencies]
+
+# Async runtime
+tokio = { version = "1.47", features = ["full"] }
+
+# Web / API
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+sqlx = { version = "0.8", features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "uuid",
+    "chrono",
+    "json",
+] }
+
+# IDs / Time
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async
+futures = "0.3"
+
+# Errors
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config
+dotenvy = "0.15"
+toml = "0.8"
+
+# Concurrent state
+dashmap = "6"
+parking_lot = "0.12"
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+# Async traits
+async-trait = "0.1"
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+    "multipart",
+] }
+
+# Scheduling
+croner = "3"
+chrono-tz = "0.10"
+
+# Secrets encryption
+aes-gcm = "0.10"
+rand = "0.8"
+hex = "0.4"
+base64 = "0.22"
+sha2 = "0.10"
+
+# Internal
+boarddo-shared = { path = "crates/shared" }
+# Telegram User/TDLib + Bot API — submodule under boarddo-telegram
+tglib = { path = "crates/boarddo-telegram/gram_api/crates/tglib" }
+tglib-core = { path = "crates/boarddo-telegram/gram_api/crates/tglib-core" }
+tglib-client = { path = "crates/boarddo-telegram/gram_api/crates/tglib-client" }
+tglib-tdlib = { path = "crates/boarddo-telegram/gram_api/crates/tglib-tdlib" }
+tglib-bot = { path = "crates/boarddo-telegram/gram_api/crates/tglib-bot" }
+boarddo-telegram = { path = "crates/boarddo-telegram" }
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

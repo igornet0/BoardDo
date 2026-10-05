@@ -1,0 +1,161 @@
+/* Tokens live in styles/tokens.css; component styles are split by area. */
+@import './styles/base.css';
+@import './styles/shell.css';
+@import './styles/canvas.css';
+@import './styles/panels.css';
+
+/* Responsive --------------------------------------------------------- */
+
+@media (max-width: 1440px) {
+  :root {
+    --sidebar-w: 220px;
+    --inspector-w: 300px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .app-shell .workspace,
+  .app-shell--no-inspector .workspace {
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+  .app-shell--no-sidebar .workspace,
+  .app-shell--no-sidebar.app-shell--no-inspector .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .editor {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: min(340px, 92vw);
+    z-index: 15;
+    box-shadow: var(--shadow-lg);
+  }
+  .topbar__test span,
+  .runtime-control__label {
+    display: none;
+  }
+  .split {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .palette {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--sidebar-w);
+    z-index: 14;
+    box-shadow: var(--shadow-lg);
+  }
+  .app-shell .workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .topbar__search span,
+  .save-state__label,
+  .crumbs__link,
+  .crumbs__sep {
+    display: none;
+  }
+  .topbar__search {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+  .two-col,
+  .split,
+  .split--form,
+  .mission,
+  .settings {
+    grid-template-columns: 1fr;
+  }
+  .modal__body--flush {
+    overflow: auto;
+  }
+  .split__side,
+  .settings__nav,
+  .mission__sidebar {
+    border: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .settings__nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .two-col .card {
+    position: static;
+  }
+  .flow-steps {
+    grid-template-columns: 1fr;
+  }
+  .flow-steps__arrow {
+    display: none;
+  }
+  .form__row--4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .debugger,
+  .debugger__io,
+  .sandbox__result {
+    grid-template-columns: 1fr;
+  }
+  .tg-workspace__grid {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .tg-chats {
+    max-height: 220px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .tg-thread {
+    min-height: 320px;
+  }
+  .bottom-panel__status .status-item {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .modal-backdrop {
+    padding: 0;
+    place-items: end stretch;
+  }
+  .modal,
+  .modal--xl {
+    max-width: none;
+    height: 92vh;
+    max-height: 92vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+  .form__row,
+  .theme-cards,
+  .choice-cards {
+    grid-template-columns: 1fr;
+  }
+  .topbar__right .btn-group,
+  .topbar__divider,
+  .topbar__test {
+    display: none;
+  }
+  .current-board {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .row {
+    flex-wrap: wrap;
+  }
+  .funnel__row {
+    grid-template-columns: 110px minmax(0, 1fr) 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

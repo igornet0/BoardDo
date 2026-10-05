@@ -1,0 +1,3 @@
+[submodule "gram_api"]
+	path = crates/boarddo-telegram/gram_api
+	url = https://github.com/igornet0/gram_api.git

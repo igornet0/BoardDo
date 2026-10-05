@@ -1,0 +1,185 @@
+/* BoardDo design tokens — dark-first IDE for AI automation.
+   Brand palette from logo: sky blue → indigo → violet. */
+
+:root,
+[data-theme='dark'] {
+  /* Brand (sampled from logo.png) */
+  --brand-from: #1d84fa;
+  --brand-mid: #3655fa;
+  --brand-to: #6032fa;
+  --brand-gradient: linear-gradient(135deg, var(--brand-from) 0%, var(--brand-mid) 48%, var(--brand-to) 100%);
+
+  /* Surfaces */
+  --bg-primary: #0a0b0f;
+  --bg-secondary: #0f1016;
+  --bg-panel: #111219;
+  --bg-canvas: #08090c;
+  --bg-elevated: #171821;
+  --bg-hover: #1d1e2a;
+  --bg-active: #252738;
+  --bg-code: #0c0d12;
+  --bg-input: #0d0e14;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-focus: rgba(74, 110, 255, 0.65);
+  --focus-ring: 0 0 0 3px rgba(58, 110, 248, 0.25);
+
+  /* Text */
+  --text-primary: #ecedf2;
+  --text-secondary: #a0a2ad;
+  --text-muted: #6c6f7b;
+  --text-inverse: #0b0c10;
+
+  /* Semantic */
+  --accent: #4a78ff;
+  --accent-soft: rgba(74, 120, 255, 0.14);
+  --success: #3dcb8a;
+  --success-soft: rgba(61, 203, 138, 0.13);
+  --warning: #e8b94f;
+  --warning-soft: rgba(232, 185, 79, 0.13);
+  --error: #ef6464;
+  --error-soft: rgba(239, 100, 100, 0.13);
+  --ai: #8b5cf6;
+  --ai-soft: rgba(139, 92, 246, 0.16);
+  --action: #f0a05a;
+  --action-soft: rgba(240, 160, 90, 0.14);
+  --trigger: #2b8dfb;
+  --trigger-soft: rgba(43, 141, 251, 0.15);
+  --logic: #95a3bd;
+  --logic-soft: rgba(149, 163, 189, 0.13);
+  --data: #5fcca8;
+  --data-soft: rgba(95, 204, 168, 0.13);
+  --integration: #f0a05a;
+
+  /* Canvas */
+  --canvas-dot: rgba(255, 255, 255, 0.07);
+  --edge-color: #50535f;
+  --minimap-mask: rgba(4, 5, 8, 0.6);
+
+  /* Compat aliases (node config forms) */
+  --bg: var(--bg-primary);
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-secondary);
+  --line: var(--border-subtle);
+  --danger: var(--error);
+  --ok: var(--success);
+  --surface: var(--bg-elevated);
+  --overlay: rgba(3, 4, 8, 0.66);
+  --shadow: rgba(0, 0, 0, 0.5);
+  --node-shadow: rgba(0, 0, 0, 0.4);
+  --btn-text-on-accent: #ffffff;
+  --bg-glow-1: rgba(29, 132, 250, 0.08);
+  --bg-glow-2: rgba(96, 50, 250, 0.09);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+
+  /* Typography */
+  --font: 'Geist', 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'Geist Mono', 'IBM Plex Mono', ui-monospace, monospace;
+  --fs-xs: 0.6875rem;
+  --fs-sm: 0.75rem;
+  --fs-base: 0.8125rem;
+  --fs-md: 0.875rem;
+  --fs-lg: 1rem;
+  --fs-xl: 1.25rem;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Radius */
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+
+  /* Layout */
+  --topbar-h: 48px;
+  --rail-w: 52px;
+  --sidebar-w: 236px;
+  --inspector-w: 320px;
+}
+
+[data-theme='light'] {
+  --brand-from: #1a78ef;
+  --brand-mid: #2f4ff0;
+  --brand-to: #5628e8;
+  --brand-gradient: linear-gradient(135deg, var(--brand-from) 0%, var(--brand-mid) 48%, var(--brand-to) 100%);
+
+  --bg-primary: #f4f5f9;
+  --bg-secondary: #eceef4;
+  --bg-panel: #ffffff;
+  --bg-canvas: #f0f2f7;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f0f2f8;
+  --bg-active: #e5e8f1;
+  --bg-code: #f3f5f9;
+  --bg-input: #ffffff;
+
+  --border-subtle: rgba(15, 20, 40, 0.07);
+  --border-default: rgba(15, 20, 40, 0.11);
+  --border-strong: rgba(15, 20, 40, 0.18);
+  --border-focus: rgba(47, 94, 240, 0.55);
+  --focus-ring: 0 0 0 3px rgba(47, 94, 240, 0.18);
+
+  --text-primary: #13141a;
+  --text-secondary: #565a66;
+  --text-muted: #8a8d98;
+  --text-inverse: #ffffff;
+
+  --accent: #2f5ef0;
+  --accent-soft: rgba(47, 94, 240, 0.09);
+  --success: #17955e;
+  --success-soft: rgba(23, 149, 94, 0.1);
+  --warning: #b9840f;
+  --warning-soft: rgba(196, 146, 26, 0.12);
+  --error: #d03f3f;
+  --error-soft: rgba(208, 63, 63, 0.09);
+  --ai: #6d3fe3;
+  --ai-soft: rgba(109, 63, 227, 0.09);
+  --action: #d07a2e;
+  --action-soft: rgba(208, 122, 46, 0.1);
+  --trigger: #1a78ef;
+  --trigger-soft: rgba(26, 120, 239, 0.09);
+  --logic: #55637d;
+  --logic-soft: rgba(85, 99, 125, 0.09);
+  --data: #1f9473;
+  --data-soft: rgba(31, 148, 115, 0.09);
+  --integration: #d07a2e;
+
+  --canvas-dot: rgba(15, 20, 40, 0.13);
+  --edge-color: #a5a9b6;
+  --minimap-mask: rgba(240, 242, 247, 0.65);
+
+  --bg: var(--bg-primary);
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-secondary);
+  --line: var(--border-subtle);
+  --danger: var(--error);
+  --ok: var(--success);
+  --surface: var(--bg-elevated);
+  --overlay: rgba(20, 24, 36, 0.32);
+  --shadow: rgba(10, 14, 20, 0.14);
+  --node-shadow: rgba(10, 14, 30, 0.07);
+  --btn-text-on-accent: #ffffff;
+  --bg-glow-1: rgba(29, 132, 250, 0.05);
+  --bg-glow-2: rgba(96, 50, 250, 0.04);
+
+  --shadow-sm: 0 1px 2px rgba(15, 20, 40, 0.06);
+  --shadow-md: 0 8px 24px rgba(15, 20, 40, 0.08), 0 1px 2px rgba(15, 20, 40, 0.06);
+  --shadow-lg: 0 24px 64px rgba(15, 20, 40, 0.16), 0 2px 6px rgba(15, 20, 40, 0.06);
+}
