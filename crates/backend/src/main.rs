@@ -15,6 +15,7 @@ mod storage;
 mod tools;
 mod telegram_automation;
 mod telegram_demand;
+mod telegram_error_report;
 mod triggers;
 mod workflow;
 

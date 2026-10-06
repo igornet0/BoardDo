@@ -20,6 +20,7 @@ impl TelegramEventRouter {
                 text,
                 is_outgoing,
                 timestamp: ts,
+                reply_to,
             } => Some(TelegramEvent::MessageReceived(TelegramMessageReceived {
                 account_id,
                 chat_id,
@@ -28,6 +29,7 @@ impl TelegramEventRouter {
                 text,
                 is_outgoing,
                 timestamp: ts,
+                reply_to,
             })),
             TelegramClientUpdate::MessageEdited {
                 chat_id,

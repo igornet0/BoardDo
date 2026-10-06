@@ -12,6 +12,7 @@ use tglib::{
     ListChatsRequest, ListChatsResponse, MockClientFactory, MockTelegramClient, SendMessageRequest,
     TelegramChat, TelegramClient, TelegramClientFactory, TelegramClientUpdate, TelegramMessage,
 };
+use tglib::{ChatMembersResponse, GetChatMembersRequest, TelegramUser, TelegramUserId};
 use tglib::{
     TelegramAccount, TelegramAccountCreated, TelegramAccountId, TelegramAccountPermissions,
     TelegramAccountProfile, TelegramAccountStatus, TelegramChatId, TelegramError, TelegramEvent,
@@ -256,6 +257,34 @@ impl TelegramAccountManager {
         request: GetMessagesRequest,
     ) -> Result<Vec<TelegramMessage>, TelegramError> {
         self.require_client(id).await?.get_messages(request).await
+    }
+
+    pub async fn get_user(
+        &self,
+        id: TelegramAccountId,
+        user_id: TelegramUserId,
+    ) -> Result<TelegramUser, TelegramError> {
+        self.require_client(id).await?.get_user(user_id).await
+    }
+
+    pub async fn get_chat_members(
+        &self,
+        id: TelegramAccountId,
+        request: GetChatMembersRequest,
+    ) -> Result<ChatMembersResponse, TelegramError> {
+        self.require_client(id).await?.get_chat_members(request).await
+    }
+
+    pub async fn get_message(
+        &self,
+        id: TelegramAccountId,
+        chat_id: TelegramChatId,
+        message_id: TelegramMessageId,
+    ) -> Result<TelegramMessage, TelegramError> {
+        self.require_client(id)
+            .await?
+            .get_message(chat_id, message_id)
+            .await
     }
 
     pub async fn send_message(

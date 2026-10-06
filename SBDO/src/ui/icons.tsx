@@ -587,6 +587,8 @@ export function IconForType({
       return <IconEdit size={size} />
     case TYPE_IDS.TELEGRAM_USER_DELETE_MESSAGES:
       return <IconTrash size={size} />
+    case TYPE_IDS.TELEGRAM_USER_GET_CHAT_MEMBERS:
+      return <IconUser size={size} />
     default:
       return <IconLog size={size} />
   }

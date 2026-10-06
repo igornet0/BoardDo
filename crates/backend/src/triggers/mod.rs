@@ -167,6 +167,8 @@ pub async fn fire_execution(
     let workflow_version = wf.version;
     let source = ctx.source.as_str().to_string();
     let trigger = ctx.payload;
+    let telegram = state.telegram.clone();
+    let workflow_name = wf.name.clone();
 
     tokio::spawn(async move {
         let changelog = std::sync::Arc::new(std::sync::Mutex::new(vec![accepted]));
@@ -196,7 +198,7 @@ pub async fn fire_execution(
                 workflow_id,
                 workflow_version,
                 &definition,
-                trigger,
+                trigger.clone(),
                 Some(&source),
                 Some(&sink),
             )
@@ -217,7 +219,12 @@ pub async fn fire_execution(
         }
 
         if let Err(err) = storage
-            .finish_execution(execution_id, status, result.error, &result.node_executions)
+            .finish_execution(
+                execution_id,
+                status,
+                result.error.clone(),
+                &result.node_executions,
+            )
             .await
         {
             tracing::error!(error = %err, %execution_id, "failed to persist execution result");
@@ -228,6 +235,23 @@ pub async fn fire_execution(
             execution_id,
             status,
         });
+
+        if status == boarddo_shared::ExecutionStatus::Failed {
+            crate::telegram_error_report::report_failure(
+                &telegram,
+                crate::telegram_error_report::FailedExecution {
+                    workflow_id,
+                    workflow_name: &workflow_name,
+                    execution_id,
+                    source: &source,
+                    definition: &definition,
+                    trigger: &trigger,
+                    error: result.error.as_deref(),
+                    node_executions: &result.node_executions,
+                },
+            )
+            .await;
+        }
     });
 
     Ok(RunWorkflowResponse {

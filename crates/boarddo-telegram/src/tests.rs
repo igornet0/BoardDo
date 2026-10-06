@@ -213,7 +213,7 @@ async fn permissions_allow_and_deny() {
     authorize(&engine, id).await;
 
     let msg_id = engine
-        .send_message(id, TelegramChatId(1), "hi".into(), None, None, None)
+        .send_message(id, TelegramChatId(1), "hi".into(), None, None, None, None)
         .await
         .unwrap();
     assert!(msg_id.0 >= 1);
@@ -230,7 +230,7 @@ async fn permissions_allow_and_deny() {
         .unwrap();
 
     let err = engine
-        .send_message(id, TelegramChatId(1), "nope".into(), None, None, None)
+        .send_message(id, TelegramChatId(1), "nope".into(), None, None, None, None)
         .await
         .unwrap_err();
     assert!(matches!(err, TelegramError::PermissionDenied(_)));
@@ -300,6 +300,7 @@ async fn automation_cross_account_and_idempotency() {
         text: Some("signal BTC".into()),
         is_outgoing: false,
         timestamp: Utc::now(),
+        reply_to: None,
     };
     let event = TelegramEvent::MessageReceived(payload.clone());
     assert!(engine.claim_event(&event).await.unwrap());
@@ -325,7 +326,7 @@ async fn automation_cross_account_and_idempotency() {
     ));
 
     engine
-        .send_message(b, TelegramChatId(99), payload.text.clone().unwrap(), None, None, Some(Uuid::now_v7()))
+        .send_message(b, TelegramChatId(99), payload.text.clone().unwrap(), None, None, None, Some(Uuid::now_v7()))
         .await
         .unwrap();
     let sends = engine.manager.mock_client(b).unwrap().recorded_sends();
@@ -425,7 +426,7 @@ async fn definition_of_done_vertical_slice() {
     }
     assert!(saw, "expected MessageReceived");
     engine2
-        .send_message(b, TelegramChatId(2), "forwarded".into(), None, None, None)
+        .send_message(b, TelegramChatId(2), "forwarded".into(), None, None, None, None)
         .await
         .unwrap();
     engine2.manager.mock_client(a).unwrap().force_error("down").await;
@@ -479,6 +480,7 @@ async fn sandbox_echo_and_ai_do_not_loop_on_outgoing() {
             "About **146 million** people.".into(),
             Some("markdown".into()),
             None,
+            None,
             Some(Uuid::now_v7()),
         )
         .await
@@ -510,6 +512,7 @@ async fn sandbox_echo_and_ai_do_not_loop_on_outgoing() {
         text: Some("@ai from my phone".into()),
         is_outgoing: true,
         timestamp: chrono::Utc::now(),
+        reply_to: None,
     };
     assert!(
         matches_message_trigger(&ai_filter, &user_typed, engine.is_boarddo_originated(&user_typed)),
@@ -522,6 +525,7 @@ async fn sandbox_echo_and_ai_do_not_loop_on_outgoing() {
             account,
             TelegramChatId(42),
             "@ai accidental echo".into(),
+            None,
             None,
             None,
             None,
@@ -552,4 +556,98 @@ async fn wait_message(
         }
     }
     panic!("expected MessageReceived event");
+}
+
+#[tokio::test]
+async fn reply_event_carries_target_and_message_is_fetchable() {
+    let (engine, _) = test_engine().await;
+    let mut rx = engine.subscribe_events();
+    let id = engine.create_account().await.unwrap().account.id;
+    authorize(&engine, id).await;
+    let mock = engine.manager.mock_client(id).unwrap();
+    mock.seed_message(tglib::TelegramMessage {
+        chat_id: TelegramChatId(42),
+        message_id: TelegramMessageId(100),
+        sender_id: Some(tglib::TelegramUserId(5)),
+        text: Some("Минфин увеличит покупку валюты".into()),
+        content_kind: "text".into(),
+        timestamp: Utc::now(),
+    });
+    mock.inject_reply(
+        TelegramChatId(42),
+        TelegramMessageId(101),
+        "@ai проанализируй его",
+        Some(9),
+        tglib::TelegramReplyTo {
+            chat_id: TelegramChatId(42),
+            message_id: TelegramMessageId(100),
+            quote: Some("покупку валюты".into()),
+        },
+    )
+    .await;
+
+    let payload = wait_message(&mut rx).await;
+    let reply = payload.reply_to.expect("reply_to");
+    assert_eq!(reply.message_id, TelegramMessageId(100));
+    assert_eq!(reply.quote.as_deref(), Some("покупку валюты"));
+
+    let original = engine
+        .get_message(id, reply.chat_id, reply.message_id)
+        .await
+        .unwrap();
+    assert_eq!(original.text.as_deref(), Some("Минфин увеличит покупку валюты"));
+    assert!(engine
+        .get_message(id, TelegramChatId(42), TelegramMessageId(999))
+        .await
+        .is_err());
+    engine.shutdown_all().await;
+}
+
+#[tokio::test]
+async fn chat_members_are_cached_and_permission_still_checked() {
+    let (engine, _) = test_engine().await;
+    let id = engine.create_account().await.unwrap().account.id;
+    authorize(&engine, id).await;
+    let mock = engine.manager.mock_client(id).unwrap();
+    let member = |uid: i64, name: &str| tglib::TelegramChatMember {
+        user: tglib::TelegramUser {
+            id: tglib::TelegramUserId(uid),
+            first_name: name.into(),
+            last_name: None,
+            username: None,
+            is_bot: false,
+        },
+        status: "member".into(),
+    };
+    let chat = TelegramChatId(-77);
+    mock.seed_chat_members(chat, vec![member(1, "Ann")]);
+    let req = || tglib::GetChatMembersRequest { chat_id: chat, limit: None };
+    let day = Some(Duration::from_secs(24 * 3600));
+
+    let first = engine.get_chat_members(id, req(), day).await.unwrap();
+    assert!(!first.from_cache);
+
+    // Membership changes, but the cached copy is still within the TTL.
+    mock.seed_chat_members(chat, vec![member(1, "Ann"), member(2, "Bob")]);
+    let cached = engine.get_chat_members(id, req(), day).await.unwrap();
+    assert!(cached.from_cache);
+    assert_eq!(cached.response.members.len(), 1);
+
+    // No TTL → fresh fetch, which also refreshes the cache.
+    let fresh = engine.get_chat_members(id, req(), None).await.unwrap();
+    assert!(!fresh.from_cache);
+    assert_eq!(fresh.response.members.len(), 2);
+
+    engine
+        .set_permissions(
+            id,
+            TelegramAccountPermissions {
+                read_messages: false,
+                ..TelegramAccountPermissions::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(engine.get_chat_members(id, req(), day).await.is_err());
+    engine.shutdown_all().await;
 }

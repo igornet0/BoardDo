@@ -255,6 +255,14 @@ fn validate_node_config(node: &Node) -> Vec<String> {
                 errors.push(format!("node `{}`: missing `message_id`", node.id));
             }
         }
+        type_ids::TELEGRAM_USER_GET_CHAT_MEMBERS => {
+            if cfg.get("account_id").and_then(Value::as_str).is_none() {
+                errors.push(format!("node `{}`: missing `account_id`", node.id));
+            }
+            if cfg.get("chat_id").is_none() {
+                errors.push(format!("node `{}`: missing `chat_id`", node.id));
+            }
+        }
         type_ids::GITHUB_GET_LATEST_RELEASE => {
             if cfg
                 .get("connection_id")

@@ -712,10 +712,38 @@
   border: none;
 }
 .tg-thread__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-subtle);
   font-weight: 600;
   background: var(--bg-panel);
+}
+.tg-thread__head > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tg-thread__id {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  cursor: pointer;
+}
+.tg-thread__id:hover {
+  color: inherit;
+  background: var(--bg-hover);
 }
 .tg-thread__messages {
   list-style: none;

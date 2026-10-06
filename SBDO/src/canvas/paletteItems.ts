@@ -304,6 +304,7 @@ export const PALETTE: PaletteItem[] = [
       chat_id: '{{trigger.chat_id}}',
       text: '{{nodes.ai.output.text}}',
       parse_mode: 'markdown',
+      reply_to_message_id: '{{trigger.message_id}}',
     },
   },
   {
@@ -329,6 +330,19 @@ export const PALETTE: PaletteItem[] = [
       message_id: '{{trigger.message_id}}',
       text: '',
       parse_mode: 'markdown',
+    },
+  },
+  {
+    typeId: TYPE_IDS.TELEGRAM_USER_GET_CHAT_MEMBERS,
+    labelKey: 'palette.telegramUser.members',
+    category: 'action',
+    groupKey: 'palette.group.telegramUser',
+    defaultConfig: {
+      account_id: '{{trigger.account_id}}',
+      chat_id: '{{trigger.chat_id}}',
+      limit: 200,
+      cache_ttl_hours: 24,
+      continue_on_error: true,
     },
   },
   {

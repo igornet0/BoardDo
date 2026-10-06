@@ -171,6 +171,7 @@ mod tests {
             text: Some(text.into()),
             is_outgoing: outgoing,
             timestamp: Utc::now(),
+            reply_to: None,
         }
     }
 

@@ -122,6 +122,7 @@ pub mod type_ids {
     pub const TELEGRAM_USER_FORWARD_MESSAGE: &str = "telegram.user.forward_message";
     pub const TELEGRAM_USER_EDIT_MESSAGE: &str = "telegram.user.edit_message";
     pub const TELEGRAM_USER_DELETE_MESSAGES: &str = "telegram.user.delete_messages";
+    pub const TELEGRAM_USER_GET_CHAT_MEMBERS: &str = "telegram.user.get_chat_members";
     pub const GITHUB_GET_LATEST_RELEASE: &str = "github.get_latest_release";
 
     // Phase 3+ — intention / AI / control (handlers land gradually)
@@ -163,6 +164,7 @@ pub mod type_ids {
         TELEGRAM_USER_FORWARD_MESSAGE,
         TELEGRAM_USER_EDIT_MESSAGE,
         TELEGRAM_USER_DELETE_MESSAGES,
+        TELEGRAM_USER_GET_CHAT_MEMBERS,
         GITHUB_GET_LATEST_RELEASE,
         AI_CHAT,
         AI_GENERATE,
@@ -200,6 +202,7 @@ pub mod type_ids {
             | TELEGRAM_USER_FORWARD_MESSAGE
             | TELEGRAM_USER_EDIT_MESSAGE
             | TELEGRAM_USER_DELETE_MESSAGES
+            | TELEGRAM_USER_GET_CHAT_MEMBERS
             | GITHUB_GET_LATEST_RELEASE => crate::NodeCategory::Action,
             AI_CHAT | AI_GENERATE | AI_ANALYZE | AI_CLASSIFY | AI_EXTRACT | AI_DECIDE | AI_PLAN
             | AI_CODE | AI_IMAGE | AI_AUDIO | AI_VIDEO => crate::NodeCategory::Action,

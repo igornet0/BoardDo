@@ -1199,6 +1199,72 @@ function TelegramUserSendForm({ config, onChange }: FormProps) {
         />
       </Field>
       <TelegramParseModeField config={config} onChange={onChange} />
+      <Field
+        label={t('editor.telegramUser.replyTo')}
+        hint={t('editor.telegramUser.replyToHint')}
+      >
+        <input
+          value={asString(config.reply_to_message_id)}
+          placeholder="{{trigger.message_id}}"
+          onChange={(e) =>
+            onChange({ ...config, reply_to_message_id: e.target.value })
+          }
+        />
+      </Field>
+    </>
+  )
+}
+
+function TelegramUserMembersForm({ config, onChange }: FormProps) {
+  const { t } = usePreferences()
+  return (
+    <>
+      <InfoBlock>{t('editor.telegramUser.membersHelp')}</InfoBlock>
+      <TelegramUserAccountField config={config} onChange={onChange} />
+      <Field label={t('editor.telegram.chatId')} hint={t('editor.exprHint')}>
+        <input
+          value={asString(config.chat_id)}
+          onChange={(e) => onChange({ ...config, chat_id: e.target.value })}
+        />
+      </Field>
+      <Field label={t('editor.telegramUser.membersLimit')}>
+        <input
+          type="number"
+          min={1}
+          max={1000}
+          value={asNumber(config.limit, 200)}
+          onChange={(e) => {
+            const n = Math.min(1000, Math.max(1, Number(e.target.value) || 200))
+            onChange({ ...config, limit: n })
+          }}
+        />
+      </Field>
+      <Field
+        label={t('editor.telegramUser.membersCacheHours')}
+        hint={t('editor.telegramUser.membersCacheHoursHint')}
+      >
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={asNumber(config.cache_ttl_hours, 24)}
+          onChange={(e) => {
+            const n = Math.max(0, Number(e.target.value) || 0)
+            onChange({ ...config, cache_ttl_hours: n })
+          }}
+        />
+      </Field>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.continue_on_error === true}
+          onChange={(e) =>
+            onChange({ ...config, continue_on_error: e.target.checked })
+          }
+        />
+        {t('editor.telegramUser.continueOnError')}
+      </label>
+      <p className="editor__hint">{t('editor.telegramUser.continueOnErrorHint')}</p>
     </>
   )
 }
@@ -1377,6 +1443,8 @@ export function NodeConfigForm({
       return <TelegramUserEditForm {...props} />
     case TYPE_IDS.TELEGRAM_USER_DELETE_MESSAGES:
       return <TelegramUserDeleteForm {...props} />
+    case TYPE_IDS.TELEGRAM_USER_GET_CHAT_MEMBERS:
+      return <TelegramUserMembersForm {...props} />
     case TYPE_IDS.DEBUG_LOG:
       return <LogForm {...props} />
     default:

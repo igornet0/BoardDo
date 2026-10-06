@@ -146,6 +146,7 @@ impl ChannelAdapter for TelegramChannelAdapter {
                     ctx.item.body.clone(),
                     Some("markdown".into()),
                     None,
+                    None,
                     Some(ctx.spec.id),
                 )
                 .await

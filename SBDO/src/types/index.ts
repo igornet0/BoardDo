@@ -229,6 +229,7 @@ export const TYPE_IDS = {
   TELEGRAM_USER_FORWARD_MESSAGE: 'telegram.user.forward_message',
   TELEGRAM_USER_EDIT_MESSAGE: 'telegram.user.edit_message',
   TELEGRAM_USER_DELETE_MESSAGES: 'telegram.user.delete_messages',
+  TELEGRAM_USER_GET_CHAT_MEMBERS: 'telegram.user.get_chat_members',
   GITHUB_GET_LATEST_RELEASE: 'github.get_latest_release',
   AI_CHAT: 'ai.chat',
   AI_CLASSIFY: 'ai.classify',

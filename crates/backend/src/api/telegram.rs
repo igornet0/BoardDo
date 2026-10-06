@@ -292,6 +292,7 @@ pub async fn send_message(
             req.parse_mode,
             None,
             None,
+            None,
         )
         .await
         .map_err(map_err)?;

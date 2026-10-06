@@ -24,7 +24,7 @@ pub use set::SetDataNode;
 pub use telegram::{TelegramSendDocument, TelegramSendMessage, TelegramSendPhoto};
 pub use telegram_user::{
     TelegramUserDeleteMessages, TelegramUserEditMessage, TelegramUserForwardMessage,
-    TelegramUserMessageReceived, TelegramUserSendMessage,
+    TelegramUserGetChatMembers, TelegramUserMessageReceived, TelegramUserSendMessage,
 };
 pub use transform::TransformNode;
 pub use trigger::{ManualTrigger, ScheduleTrigger, WebhookTrigger};

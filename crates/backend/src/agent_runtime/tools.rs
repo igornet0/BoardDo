@@ -1300,6 +1300,7 @@ async fn marketing_publisher(
                     draft.body.clone(),
                     Some("markdown".into()),
                     None,
+                    None,
                     Some(spec.id),
                 )
                 .await

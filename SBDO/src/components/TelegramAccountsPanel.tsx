@@ -23,7 +23,7 @@ import {
 import { usePreferences } from '../settings/PreferencesContext'
 import { useConfirm } from '../ui/Modal'
 import { Avatar, Badge, Card, EmptyState, Field, Notice, SearchInput, type Tone } from '../ui/primitives'
-import { IconFlask, IconPlus, IconRefresh, IconSend, IconTrash, IconUser, IconClose } from '../ui/icons'
+import { IconCopy, IconFlask, IconPlus, IconRefresh, IconSend, IconTrash, IconUser, IconClose } from '../ui/icons'
 
 interface Props {
   active: boolean
@@ -72,6 +72,7 @@ export function TelegramAccountsSection({ active }: Props) {
   const [messages, setMessages] = useState<TelegramMessage[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<TelegramChat[]>([])
+  const [copiedChatId, setCopiedChatId] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
   const [mockSimulate, setMockSimulate] = useState(false)
   const [simText, setSimText] = useState('BTC LONG')
@@ -482,7 +483,9 @@ export function TelegramAccountsSection({ active }: Props) {
                       <Avatar text={chat.title || String(chat.id)} size={30} />
                       <span className="tg-chat__text">
                         <strong>{chatLabel(chat)}</strong>
-                        <span>{chat.chat_type}</span>
+                        <span>
+                          {chat.chat_type} · {chat.id}
+                        </span>
                       </span>
                     </button>
                   </li>
@@ -496,7 +499,22 @@ export function TelegramAccountsSection({ active }: Props) {
                 <EmptyState compact icon={<IconSend size={18} />} title={t('telegram.pickChat')} />
               ) : (
                 <>
-                  <div className="tg-thread__head">{selectedChat ? chatLabel(selectedChat) : t('telegram.messages')}</div>
+                  <div className="tg-thread__head">
+                    <span>{selectedChat ? chatLabel(selectedChat) : t('telegram.messages')}</span>
+                    <button
+                      type="button"
+                      className="tg-thread__id"
+                      data-tip={t('telegram.copyChatId')}
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(String(selectedChatId))
+                        setCopiedChatId(selectedChatId)
+                        window.setTimeout(() => setCopiedChatId(null), 1200)
+                      }}
+                    >
+                      <code>{selectedChatId}</code>
+                      {copiedChatId === selectedChatId ? <span>✓</span> : <IconCopy size={11} />}
+                    </button>
+                  </div>
                   <ul className="tg-thread__messages">
                     {[...messages].reverse().map((msg) => (
                       <li key={msg.message_id} className="tg-msg">

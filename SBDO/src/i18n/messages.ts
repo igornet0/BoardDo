@@ -144,6 +144,7 @@ const en = {
   'palette.telegramUser.forward': 'User Forward Message',
   'palette.telegramUser.edit': 'User Edit Message',
   'palette.telegramUser.delete': 'User Delete Message',
+  'palette.telegramUser.members': 'User Chat Members',
 
   'editor.empty': 'Select a node to configure',
   'editor.emptyTitle': 'No node selected',
@@ -281,6 +282,18 @@ const en = {
   'editor.telegramUser.fromChat': 'From chat ID',
   'editor.telegramUser.toChat': 'To chat ID',
   'editor.telegramUser.messageId': 'Message ID',
+  'editor.telegramUser.replyTo': 'Reply to message ID',
+  'editor.telegramUser.replyToHint':
+    'Send as a reply to this message, e.g. {{trigger.message_id}}. Leave empty to send a plain message.',
+  'editor.telegramUser.membersHelp':
+    'Lists chat members. Output: {{nodes.<id>.output.members}} (id, name, username, mention, status) and a prompt-ready block {{nodes.<id>.output.context}}.',
+  'editor.telegramUser.membersLimit': 'Max members',
+  'editor.telegramUser.membersCacheHours': 'Cache, hours',
+  'editor.telegramUser.membersCacheHoursHint':
+    'Reuse the list fetched within this many hours (membership rarely changes). 0 — fetch on every run.',
+  'editor.telegramUser.continueOnError': 'Continue on error',
+  'editor.telegramUser.continueOnErrorHint':
+    'If the member list is hidden or unavailable, output an empty list instead of failing the run.',
   'editor.telegramUser.chatIdHint':
     'Optional: only this one chat. Prefer Only / Ignore lists for several chats.',
   'editor.telegramUser.onlyChatIds': 'Only these chat IDs',
@@ -491,6 +504,7 @@ const en = {
   'telegram.refreshChats': 'Refresh chats',
   'telegram.chats': 'Dialogs',
   'telegram.messages': 'Messages',
+  'telegram.copyChatId': 'Copy chat ID',
   'telegram.pickChat': 'Select a chat or search for a channel',
   'telegram.compose': 'Message…',
   'telegram.send': 'Send',
@@ -1025,6 +1039,7 @@ const ru: Record<MessageKey, string> = {
   'palette.telegramUser.forward': 'Переслать (user)',
   'palette.telegramUser.edit': 'Изменить (user)',
   'palette.telegramUser.delete': 'Удалить (user)',
+  'palette.telegramUser.members': 'Участники чата (user)',
 
   'editor.empty': 'Выберите ноду для настройки',
   'editor.emptyTitle': 'Нода не выбрана',
@@ -1163,6 +1178,18 @@ const ru: Record<MessageKey, string> = {
   'editor.telegramUser.fromChat': 'Из chat ID',
   'editor.telegramUser.toChat': 'В chat ID',
   'editor.telegramUser.messageId': 'ID сообщения',
+  'editor.telegramUser.replyTo': 'Ответить на сообщение (ID)',
+  'editor.telegramUser.replyToHint':
+    'Отправить ответом на это сообщение, например {{trigger.message_id}}. Пусто — обычное сообщение.',
+  'editor.telegramUser.membersHelp':
+    'Список участников чата. Выход: {{nodes.<id>.output.members}} (id, name, username, mention, status) и готовый блок для промпта {{nodes.<id>.output.context}}.',
+  'editor.telegramUser.membersLimit': 'Максимум участников',
+  'editor.telegramUser.membersCacheHours': 'Кэш, часов',
+  'editor.telegramUser.membersCacheHoursHint':
+    'Использовать список, полученный не раньше чем столько часов назад (состав меняется редко). 0 — запрашивать при каждом запуске.',
+  'editor.telegramUser.continueOnError': 'Продолжать при ошибке',
+  'editor.telegramUser.continueOnErrorHint':
+    'Если список участников скрыт или недоступен — вернуть пустой список, а не ронять сценарий.',
   'editor.telegramUser.chatIdHint':
     'Опционально: только один чат. Для нескольких — списки Only / Ignore.',
   'editor.telegramUser.onlyChatIds': 'Только эти chat ID',
@@ -1376,6 +1403,7 @@ const ru: Record<MessageKey, string> = {
   'telegram.refreshChats': 'Обновить чаты',
   'telegram.chats': 'Диалоги',
   'telegram.messages': 'Сообщения',
+  'telegram.copyChatId': 'Скопировать chat ID',
   'telegram.pickChat': 'Выберите чат или найдите канал',
   'telegram.compose': 'Сообщение…',
   'telegram.send': 'Отправить',

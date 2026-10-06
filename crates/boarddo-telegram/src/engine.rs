@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+use tglib::{GetChatMembersRequest, TelegramUser, TelegramUserId};
 use tglib::{
     DeleteMessagesRequest, EditMessageRequest, ForwardMessagesRequest, GetMessagesRequest,
     ListChatsRequest, ListChatsResponse, MockClientFactory, SearchChatsRequest, SendMessageRequest,
@@ -18,6 +20,7 @@ use tglib::{
 
 use crate::account_manager::TelegramAccountManager;
 use crate::audit::TelegramAuditService;
+use crate::members_cache::{ChatMembersResult, MembersCache};
 use crate::outbound::OutboundTracker;
 use crate::permission::TelegramPermissionService;
 use crate::store::TelegramSessionStore;
@@ -25,15 +28,32 @@ use crate::store::TelegramSessionStore;
 /// Permission-checked Telegram user operations used by SmartDo action nodes.
 #[async_trait]
 pub trait TelegramUserGateway: Send + Sync {
+    /// `reply_to` sends the text as a reply to that message in `chat_id`.
+    #[allow(clippy::too_many_arguments)]
     async fn send_message(
         &self,
         account_id: TelegramAccountId,
         chat_id: TelegramChatId,
         text: String,
         parse_mode: Option<String>,
+        reply_to: Option<TelegramMessageId>,
         execution_id: Option<Uuid>,
         scenario_id: Option<Uuid>,
     ) -> Result<TelegramMessageId, TelegramError>;
+
+    async fn get_user(
+        &self,
+        account_id: TelegramAccountId,
+        user_id: TelegramUserId,
+    ) -> Result<TelegramUser, TelegramError>;
+
+    /// With `max_age`, a cached list at most that old is reused.
+    async fn get_chat_members(
+        &self,
+        account_id: TelegramAccountId,
+        request: GetChatMembersRequest,
+        max_age: Option<Duration>,
+    ) -> Result<ChatMembersResult, TelegramError>;
 
     async fn forward_messages(
         &self,
@@ -70,9 +90,27 @@ impl TelegramUserGateway for NullTelegramUserGateway {
         _chat_id: TelegramChatId,
         _text: String,
         _parse_mode: Option<String>,
+        _reply_to: Option<TelegramMessageId>,
         _execution_id: Option<Uuid>,
         _scenario_id: Option<Uuid>,
     ) -> Result<TelegramMessageId, TelegramError> {
+        Err(TelegramError::Unavailable("telegram user engine not configured".into()))
+    }
+
+    async fn get_user(
+        &self,
+        _account_id: TelegramAccountId,
+        _user_id: TelegramUserId,
+    ) -> Result<TelegramUser, TelegramError> {
+        Err(TelegramError::Unavailable("telegram user engine not configured".into()))
+    }
+
+    async fn get_chat_members(
+        &self,
+        _account_id: TelegramAccountId,
+        _request: GetChatMembersRequest,
+        _max_age: Option<Duration>,
+    ) -> Result<ChatMembersResult, TelegramError> {
         Err(TelegramError::Unavailable("telegram user engine not configured".into()))
     }
 
@@ -113,6 +151,7 @@ pub struct TelegramEngine {
     pub permissions: Arc<TelegramPermissionService>,
     pub audit: Arc<TelegramAuditService>,
     pub outbound: Arc<OutboundTracker>,
+    pub members_cache: Arc<MembersCache>,
 }
 
 impl TelegramEngine {
@@ -136,6 +175,7 @@ impl TelegramEngine {
             permissions,
             audit,
             outbound: Arc::new(OutboundTracker::new()),
+            members_cache: Arc::new(MembersCache::new()),
         }
     }
 
@@ -270,6 +310,18 @@ impl TelegramEngine {
             .check(id, TelegramActionKind::ReadMessages)
             .await?;
         self.manager.get_messages(id, request).await
+    }
+
+    pub async fn get_message(
+        &self,
+        id: TelegramAccountId,
+        chat_id: TelegramChatId,
+        message_id: TelegramMessageId,
+    ) -> Result<TelegramMessage, TelegramError> {
+        self.permissions
+            .check(id, TelegramActionKind::ReadMessages)
+            .await?;
+        self.manager.get_message(id, chat_id, message_id).await
     }
 
     pub async fn get_account_info(
@@ -438,6 +490,7 @@ impl TelegramUserGateway for TelegramEngine {
         chat_id: TelegramChatId,
         text: String,
         parse_mode: Option<String>,
+        reply_to: Option<TelegramMessageId>,
         execution_id: Option<Uuid>,
         scenario_id: Option<Uuid>,
     ) -> Result<TelegramMessageId, TelegramError> {
@@ -460,6 +513,7 @@ impl TelegramUserGateway for TelegramEngine {
                                 chat_id,
                                 text,
                                 parse_mode: mode,
+                                reply_to_message_id: reply_to,
                             },
                         )
                         .await
@@ -468,6 +522,43 @@ impl TelegramUserGateway for TelegramEngine {
             .await?;
         outbound.note_sent(account_id, chat_id, message_id);
         Ok(message_id)
+    }
+
+    async fn get_user(
+        &self,
+        account_id: TelegramAccountId,
+        user_id: TelegramUserId,
+    ) -> Result<TelegramUser, TelegramError> {
+        self.permissions
+            .check(account_id, TelegramActionKind::ReadMessages)
+            .await?;
+        self.manager.get_user(account_id, user_id).await
+    }
+
+    async fn get_chat_members(
+        &self,
+        account_id: TelegramAccountId,
+        request: GetChatMembersRequest,
+        max_age: Option<Duration>,
+    ) -> Result<ChatMembersResult, TelegramError> {
+        // Checked before the cache so a revoked permission takes effect immediately.
+        self.permissions
+            .check(account_id, TelegramActionKind::ReadMessages)
+            .await?;
+        let chat_id = request.chat_id;
+        let limit = request.limit.unwrap_or(200);
+        if let Some(max_age) = max_age {
+            if let Some(hit) = self.members_cache.get(account_id, chat_id, limit, max_age) {
+                return Ok(hit);
+            }
+        }
+        let response = self.manager.get_chat_members(account_id, request).await?;
+        let fetched_at = self.members_cache.put(account_id, chat_id, limit, &response);
+        Ok(ChatMembersResult {
+            response,
+            fetched_at,
+            from_cache: false,
+        })
     }
 
     async fn forward_messages(
