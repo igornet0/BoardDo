@@ -148,7 +148,12 @@ impl Engine {
             };
         }
 
-        self.executor.run(definition, ctx, on_event).await
+        let scope = boarddo_shared::v2::LedgerScope {
+            workflow_id: Some(workflow_id),
+            execution_id: Some(execution_id),
+            ..Default::default()
+        };
+        crate::ledger::scoped(scope, self.executor.run(definition, ctx, on_event)).await
     }
 }
 

@@ -32,7 +32,11 @@ async fn tick_due(state: &SharedState) -> anyhow::Result<()> {
             warn!(run_id = %run.id, "goal spec missing for run");
             continue;
         };
-        if let Err(err) = super::tick::run_tick(state, spec, run).await {
+        let scope = boarddo_shared::v2::LedgerScope {
+            goal_run_id: Some(run.id),
+            ..Default::default()
+        };
+        if let Err(err) = crate::ledger::scoped(scope, super::tick::run_tick(state, spec, run)).await {
             error!(error = %err, "goal tick failed");
         }
     }

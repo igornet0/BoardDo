@@ -274,6 +274,18 @@ export function IconFlag(p: IconProps) {
   )
 }
 
+export function IconSpend(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <ellipse cx="9" cy="6" rx="6" ry="3" />
+      <path d="M3 6v4c0 1.66 2.69 3 6 3s6-1.34 6-3V6" />
+      <path d="M3 10v4c0 1.66 2.69 3 6 3 1.1 0 2.13-.15 3-.41" />
+      <circle cx="17" cy="16" r="4" />
+      <path d="M17 14.5v3" />
+    </svg>
+  )
+}
+
 export function IconSales(p: IconProps) {
   return (
     <svg {...base(p)}>

@@ -169,8 +169,9 @@ pub async fn fire_execution(
     let trigger = ctx.payload;
     let telegram = state.telegram.clone();
     let workflow_name = wf.name.clone();
+    let ledger_scope = crate::ledger::current();
 
-    tokio::spawn(async move {
+    tokio::spawn(crate::ledger::within(ledger_scope, async move {
         let changelog = std::sync::Arc::new(std::sync::Mutex::new(vec![accepted]));
         let changelog_live = changelog.clone();
         let storage_live = storage.clone();
@@ -252,7 +253,7 @@ pub async fn fire_execution(
             )
             .await;
         }
-    });
+    }));
 
     Ok(RunWorkflowResponse {
         execution_id,

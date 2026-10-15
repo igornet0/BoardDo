@@ -8,6 +8,7 @@ mod connections;
 mod engine;
 mod ingress;
 mod integrations;
+mod ledger;
 mod objectives;
 mod projecthub;
 mod runtime;
@@ -53,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     let storage = Storage::connect(&database_url).await?;
     storage.migrate().await?;
+    ledger::init(storage.clone());
 
     let secrets_store = Arc::new(EncryptedSqliteSecretStore::from_env(
         storage.pool().clone(),

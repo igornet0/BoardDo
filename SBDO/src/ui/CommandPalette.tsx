@@ -8,6 +8,7 @@ import {
   IconCommand,
   IconFlag,
   IconSales,
+  IconSpend,
   IconFlask,
   IconFolder,
   IconForType,
@@ -36,6 +37,7 @@ export type CommandAction =
   | { kind: 'scenarios' }
   | { kind: 'objectives' }
   | { kind: 'sales' }
+  | { kind: 'spend' }
   | { kind: 'projecthub' }
   | { kind: 'goals' }
   | { kind: 'tools' }
@@ -161,6 +163,13 @@ export function CommandPalette({
               label: t('app.sales'),
               group: t('cmd.group.navigate'),
               action: { kind: 'sales' },
+            },
+            {
+              id: 'spend',
+              icon: <IconSpend size={14} />,
+              label: t('app.spend'),
+              group: t('cmd.group.navigate'),
+              action: { kind: 'spend' },
             },
             {
               id: 'projecthub',

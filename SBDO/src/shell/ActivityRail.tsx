@@ -10,6 +10,7 @@ import {
   IconPlug,
   IconRadio,
   IconSales,
+  IconSpend,
   IconSend,
   IconSettings,
   IconSidebar,
@@ -25,6 +26,7 @@ export type RailTarget =
   | 'scenarios'
   | 'objectives'
   | 'sales'
+  | 'spend'
   | 'goals'
   | 'runtime'
   | 'ingress'
@@ -50,6 +52,7 @@ const MAIN: { id: RailTarget; key: MessageKey; icon: ReactNode }[] = [
   { id: 'scenarios', key: 'nav.scenarios', icon: <IconTemplate size={18} /> },
   { id: 'objectives', key: 'nav.objectives', icon: <IconFlag size={18} /> },
   { id: 'sales', key: 'nav.sales', icon: <IconSales size={18} /> },
+  { id: 'spend', key: 'nav.spend', icon: <IconSpend size={18} /> },
   { id: 'goals', key: 'nav.goals', icon: <IconTarget size={18} /> },
   { id: 'runtime', key: 'nav.runtime', icon: <IconActivity size={18} /> },
 ]

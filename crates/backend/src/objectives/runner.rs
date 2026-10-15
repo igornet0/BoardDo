@@ -101,7 +101,11 @@ pub async fn start(
         let state = state.clone();
         tokio::spawn(async move {
             let _guard = LoopGuard(id);
-            run_loop(&state, id, only).await;
+            let scope = boarddo_shared::v2::LedgerScope {
+                objective_id: Some(id),
+                ..Default::default()
+            };
+            crate::ledger::scoped(scope, run_loop(&state, id, only)).await;
         });
     }
     Ok(updated)
@@ -270,7 +274,12 @@ pub async fn run_item(state: &SharedState, id: Uuid, item_id: &str) -> Result<()
     })
     .await?;
 
-    let outcome = execute_item(state, &o, item_id).await;
+    let scope = boarddo_shared::v2::LedgerScope {
+        objective_id: Some(id),
+        item_id: Some(item_id.to_string()),
+        ..Default::default()
+    };
+    let outcome = crate::ledger::scoped(scope, execute_item(state, &o, item_id)).await;
     let retryable = matches!(&outcome, Err(e) if is_transient(e));
 
     mutate(state, id, |o| {

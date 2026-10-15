@@ -129,7 +129,40 @@ pub async fn chat_complete(
     Ok((result.text, result.usage, result.model))
 }
 
+/// Every chat call in BoardDo goes through here, so this is where spend is
+/// recorded in the execution ledger.
 pub async fn chat_complete_messages(
+    endpoint: &OpenAiEndpoint,
+    model: &str,
+    messages: &[ChatMessage],
+    temperature: f64,
+    max_tokens: u64,
+    timeout_ms: u64,
+) -> Result<ChatCompletion, String> {
+    let started = std::time::Instant::now();
+    let result =
+        chat_complete_inner(endpoint, model, messages, temperature, max_tokens, timeout_ms).await;
+    let entry = match &result {
+        Ok(c) => crate::ledger::chat_entry(
+            endpoint.provider.as_str(),
+            &c.model,
+            Some(&c.usage),
+            started.elapsed(),
+            None,
+        ),
+        Err(err) => crate::ledger::chat_entry(
+            endpoint.provider.as_str(),
+            model,
+            None,
+            started.elapsed(),
+            Some(err),
+        ),
+    };
+    crate::ledger::record(entry);
+    result
+}
+
+async fn chat_complete_inner(
     endpoint: &OpenAiEndpoint,
     model: &str,
     messages: &[ChatMessage],

@@ -31,6 +31,7 @@ import { ScenariosPanel } from './components/ScenariosPanel'
 import { GoalsPanel } from './components/GoalsPanel'
 import { ObjectivesPanel } from './components/ObjectivesPanel'
 import { SalesPanel } from './components/SalesPanel'
+import { SpendPanel } from './components/SpendPanel'
 import { ProjectHubPanel } from './components/ProjectHubPanel'
 import { ToolsPanel } from './components/ToolsPanel'
 import { SettingsPanel, type SettingsTab } from './components/SettingsPanel'
@@ -62,6 +63,7 @@ type Panel =
   | 'scenarios'
   | 'objectives'
   | 'sales'
+  | 'spend'
   | 'projecthub'
   | 'goals'
   | 'tools'
@@ -798,6 +800,7 @@ export default function App() {
       case 'scenarios':
       case 'objectives':
       case 'sales':
+      case 'spend':
       case 'projecthub':
       case 'goals':
       case 'tools':
@@ -1029,6 +1032,7 @@ export default function App() {
       />
 
       <SalesPanel open={panel === 'sales'} onClose={() => setPanel(null)} />
+      <SpendPanel open={panel === 'spend'} onClose={() => setPanel(null)} />
 
       <ObjectivesPanel
         open={panel === 'objectives'}

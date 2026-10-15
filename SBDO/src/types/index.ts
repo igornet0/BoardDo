@@ -890,3 +890,58 @@ export interface SalesSummary {
   by_stage: { stage?: DealStage | null; count: number; amount: number }[]
   daily: { date: string; new_deals: number; won: number; revenue: number }[]
 }
+
+// ----- execution ledger (model spend) ----------------------------------------
+
+export interface LedgerEntry {
+  id: string
+  at: string
+  provider: string
+  model: string
+  kind: string
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number | null
+  duration_ms: number
+  ok: boolean
+  error?: string
+  objective_id?: string
+  item_id?: string
+  goal_run_id?: string
+  workflow_id?: string
+  execution_id?: string
+}
+
+export interface LedgerTotals {
+  calls: number
+  failed_calls: number
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number
+  unpriced_calls: number
+  duration_ms: number
+}
+
+export interface LedgerGroup extends LedgerTotals {
+  key: string
+}
+
+export interface LedgerSummary {
+  totals: LedgerTotals
+  by_model: LedgerGroup[]
+  by_objective: LedgerGroup[]
+  by_workflow: LedgerGroup[]
+  /** `YYYY-MM-DD` (UTC), oldest first. */
+  by_day: LedgerGroup[]
+}
+
+export interface LedgerFilter {
+  since?: string
+  until?: string
+  objective_id?: string
+  goal_run_id?: string
+  workflow_id?: string
+  execution_id?: string
+  model?: string
+  limit?: number
+}

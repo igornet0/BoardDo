@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend-ledger",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "LISTEN_ADDR=127.0.0.1:8081 DATABASE_URL='sqlite:/private/tmp/claude-501/-Users-igor-Desktop-Ai-Holding-aka--------Service-ai-control-office-rust-BoardDo/6513eb1f-17c3-4f23-97d9-017b2a85ce29/scratchpad/boarddo.db?mode=rwc' BOARDDO_DATA_DIR=/private/tmp/claude-501/-Users-igor-Desktop-Ai-Holding-aka--------Service-ai-control-office-rust-BoardDo/6513eb1f-17c3-4f23-97d9-017b2a85ce29/scratchpad/data RUST_LOG=info cargo run -p smartdo"],
+      "port": 8081
+    },
+    {
+      "name": "frontend-ledger",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd SBDO && BOARDDO_BACKEND=127.0.0.1:8081 npm run dev -- --port 5174 --strictPort"],
+      "port": 5174
+    }
+  ]
+}

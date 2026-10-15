@@ -7,6 +7,7 @@ mod health;
 mod ingress;
 mod media;
 mod objectives;
+mod ledger;
 mod sales;
 mod projecthub;
 mod alertwim;
@@ -193,6 +194,7 @@ pub fn router(state: SharedState) -> Router {
         .nest("/api", goals::router())
         .nest("/api", objectives::router())
         .nest("/api", sales::router())
+        .nest("/api", ledger::router())
         .nest("/api", projecthub::router())
         .nest("/api", alertwim::router())
         .layer(cors)

@@ -1,0 +1,20 @@
+/* Spend (execution ledger) panel — reuses the sales layout classes. */
+
+.spend__model {
+  max-width: 220px;
+  margin-left: auto;
+}
+
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}

@@ -14,6 +14,7 @@ use crate::triggers::schedule::{next_run_after, schedules_from_definition};
 pub(crate) mod content;
 mod custom_tools;
 mod goals;
+mod ledger;
 mod marketing;
 mod objectives;
 mod sales;
@@ -339,6 +340,7 @@ impl Storage {
         self.migrate_custom_tools().await?;
         self.migrate_objectives().await?;
         self.migrate_sales().await?;
+        self.migrate_ledger().await?;
 
         Ok(())
     }
