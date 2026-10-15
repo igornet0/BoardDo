@@ -1,36 +1,18 @@
-//! Static checks on Python tool source before sandbox execution.
+//! Request-level checks. Source code is checked by the sandbox harness (AST +
+//! audit hook), which knows the tool's permissions.
 
-const BLOCKED_PATTERNS: &[(&str, &str)] = &[
-    ("os.system", "os.system"),
-    ("subprocess", "subprocess"),
-    ("eval(", "eval"),
-    ("exec(", "exec"),
-    ("__import__", "__import__"),
-    ("ctypes", "ctypes"),
-    ("socket.socket", "socket"),
-    ("open('/", "unsafe filesystem path"),
-    ("open(\"/", "unsafe filesystem path"),
-    ("environ[", "environment secret access"),
-    ("getenv(", "environment access"),
-];
-
-pub fn scan_python_source(source: &str, permissions: &boarddo_shared::v2::ToolPermissions) -> Result<(), String> {
-    let lower = source.to_lowercase();
-    for (pat, label) in BLOCKED_PATTERNS {
-        if source.contains(pat) || lower.contains(pat) {
-            if *pat == "getenv(" && permissions.filesystem_read {
-                continue;
-            }
-            return Err(format!("blocked construct: {label}"));
-        }
+/// `snake_case`, starts with a letter, 2–64 chars: safe in URLs, logs and prompts.
+pub fn validate_name(name: &str) -> Result<(), String> {
+    let ok = (2..=64).contains(&name.len())
+        && name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "invalid tool name `{name}`: use 2–64 characters a-z, 0-9 and _, starting with a letter"
+        ))
     }
-    if !permissions.network && (source.contains("import requests") || source.contains("urllib")) {
-        return Err("network import without network permission".into());
-    }
-    if !permissions.shell && source.contains("Popen") {
-        return Err("shell execution pattern without shell permission".into());
-    }
-    Ok(())
 }
 
 pub fn validate_requirements(requirements: &[String]) -> Result<(), String> {

@@ -1,6 +1,7 @@
 //! Route Telegram user events into armed scenario runtimes.
 
 use boarddo_shared::{WorkflowRecord, type_ids};
+use chrono::{DateTime, Utc};
 use boarddo_telegram::{MessageTriggerFilter, TelegramUserGateway, matches_message_trigger};
 use serde_json::{Value, json};
 use tglib::{TelegramEvent, TelegramMessageReceived, TelegramUser, TelegramUserId};
@@ -48,10 +49,12 @@ async fn handle_event(state: &SharedState, event: TelegramEvent) -> anyhow::Resu
 
     let mut targets: Vec<&WorkflowRecord> = Vec::new();
     let mut ignored_by_chat = false;
+    let mut backlog = false;
     for wf in &workflows {
         if !state.runtime.is_accepting(wf.id) {
             continue;
         }
+        let started_at = state.runtime.started_at(wf.id);
         let mut matched = false;
         for node in &wf.definition.nodes {
             if node.type_id != type_ids::TRIGGER_TELEGRAM_USER_MESSAGE_RECEIVED {
@@ -59,6 +62,10 @@ async fn handle_event(state: &SharedState, event: TelegramEvent) -> anyhow::Resu
             }
             let filter = MessageTriggerFilter::from_node_config(&node.config);
             if matches_message_trigger(&filter, payload, from_boarddo) {
+                if is_backlog(&filter, payload, started_at) {
+                    backlog = true;
+                    continue;
+                }
                 matched = true;
                 break;
             }
@@ -72,7 +79,15 @@ async fn handle_event(state: &SharedState, event: TelegramEvent) -> anyhow::Resu
     }
 
     if targets.is_empty() {
-        if ignored_by_chat {
+        if backlog {
+            tracing::debug!(
+                account_id = %payload.account_id,
+                chat_id = %payload.chat_id,
+                message_id = %payload.message_id,
+                timestamp = %payload.timestamp,
+                "telegram.scenario.backlog_skipped"
+            );
+        } else if ignored_by_chat {
             tracing::debug!(
                 account_id = %payload.account_id,
                 chat_id = %payload.chat_id,
@@ -353,6 +368,23 @@ fn reply_context(text: Option<&str>, quote: Option<&str>, content_kind: Option<&
     out
 }
 
+/// True when the message predates the scenario start and the trigger does not
+/// opt into backlog. Telegram dates have second precision, so compare against
+/// the start second to keep messages sent in the same second.
+fn is_backlog(
+    filter: &MessageTriggerFilter,
+    event: &TelegramMessageReceived,
+    started_at: Option<DateTime<Utc>>,
+) -> bool {
+    if filter.process_backlog {
+        return false;
+    }
+    let Some(started_at) = started_at else {
+        return false;
+    };
+    event.timestamp.timestamp() < started_at.timestamp()
+}
+
 /// True when the only reason the filter rejects is the ignore-chat block-list.
 fn filter_rejects_only_by_ignore(
     filter: &MessageTriggerFilter,
@@ -453,8 +485,13 @@ async fn maybe_record_goal_leads(
 
 #[cfg(test)]
 mod tests {
-    use super::{reply_context, sender_context};
-    use tglib::{TelegramUser, TelegramUserId};
+    use super::{is_backlog, reply_context, sender_context};
+    use boarddo_telegram::MessageTriggerFilter;
+    use chrono::{Duration, TimeZone, Utc};
+    use tglib::{
+        TelegramAccountId, TelegramChatId, TelegramMessageId, TelegramMessageReceived,
+        TelegramUser, TelegramUserId,
+    };
 
     fn user(id: i64, name: &str, username: Option<&str>) -> TelegramUser {
         TelegramUser {
@@ -507,5 +544,36 @@ mod tests {
     fn reply_context_empty_when_nothing_known() {
         assert_eq!(reply_context(None, None, None), "");
         assert_eq!(reply_context(None, Some("  "), None), "");
+    }
+
+    fn message_at(ts: chrono::DateTime<Utc>) -> TelegramMessageReceived {
+        TelegramMessageReceived {
+            account_id: TelegramAccountId(uuid::Uuid::nil()),
+            chat_id: TelegramChatId(1),
+            message_id: TelegramMessageId(1),
+            sender_id: None,
+            text: Some("hi".into()),
+            is_outgoing: false,
+            timestamp: ts,
+            reply_to: None,
+        }
+    }
+
+    #[test]
+    fn backlog_skipped_by_default() {
+        let started = Utc.timestamp_opt(1_000, 500_000_000).unwrap();
+        let filter = MessageTriggerFilter::default();
+        assert!(is_backlog(&filter, &message_at(started - Duration::seconds(5)), Some(started)));
+        // Telegram dates are whole seconds: same-second messages are kept.
+        assert!(!is_backlog(&filter, &message_at(Utc.timestamp_opt(1_000, 0).unwrap()), Some(started)));
+        assert!(!is_backlog(&filter, &message_at(started + Duration::seconds(1)), Some(started)));
+        assert!(!is_backlog(&filter, &message_at(started - Duration::seconds(5)), None));
+    }
+
+    #[test]
+    fn backlog_processed_when_opted_in() {
+        let started = Utc.timestamp_opt(1_000, 0).unwrap();
+        let filter = MessageTriggerFilter::from_node_config(&serde_json::json!({ "process_backlog": true }));
+        assert!(!is_backlog(&filter, &message_at(started - Duration::seconds(60)), Some(started)));
     }
 }

@@ -1,13 +1,19 @@
 //! OpenAI-compatible Chat Completions + media clients.
 
+use boarddo_shared::{
+    LlmProvider, is_llm_connection_type, llm_base_url, llm_default_model, llm_provider,
+};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+/// LLM endpoint resolved from a connection. Despite the name it also covers
+/// Claude: `provider` switches the wire protocol in [`chat_complete_messages`].
 #[derive(Debug, Clone)]
 pub struct OpenAiEndpoint {
     pub api_key: String,
     pub base_url: String,
     pub default_model: String,
+    pub provider: LlmProvider,
 }
 
 impl OpenAiEndpoint {
@@ -17,6 +23,55 @@ impl OpenAiEndpoint {
             "https://api.openai.com/v1".into()
         } else {
             trimmed.trim_end_matches('/').to_string()
+        }
+    }
+
+    /// Build from a resolved `openai` / `ai` / `anthropic` connection.
+    pub fn from_connection(
+        connection_type: &str,
+        config: &Value,
+        credentials: &Value,
+    ) -> Result<Self, String> {
+        if !is_llm_connection_type(connection_type) {
+            return Err(format!(
+                "connection type `{connection_type}` is not an AI provider (use openai or anthropic)"
+            ));
+        }
+        let api_key = credentials
+            .get("api_key")
+            .or_else(|| credentials.get("token"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                credentials
+                    .get("auth")
+                    .and_then(|a| a.get("token"))
+                    .and_then(Value::as_str)
+            })
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "connection secret must include `api_key`".to_string())?
+            .to_string();
+        let provider = llm_provider(connection_type, config);
+        let base_url = llm_base_url(connection_type, config);
+        let default_model = llm_default_model(connection_type, config);
+        Ok(Self {
+            api_key,
+            base_url,
+            default_model,
+            provider,
+        })
+    }
+
+    pub fn is_anthropic(&self) -> bool {
+        self.provider == LlmProvider::Anthropic
+    }
+
+    fn require_openai(&self, what: &str) -> Result<(), String> {
+        if self.is_anthropic() {
+            Err(format!(
+                "{what}: Claude connections support text chat only — pick an OpenAI-compatible connection for media"
+            ))
+        } else {
+            Ok(())
         }
     }
 }
@@ -82,6 +137,17 @@ pub async fn chat_complete_messages(
     max_tokens: u64,
     timeout_ms: u64,
 ) -> Result<ChatCompletion, String> {
+    if endpoint.is_anthropic() {
+        return super::anthropic::messages_complete(
+            endpoint,
+            model,
+            messages,
+            temperature,
+            max_tokens,
+            timeout_ms,
+        )
+        .await;
+    }
     let payload: Vec<Value> = messages
         .iter()
         .map(|m| json!({ "role": m.role, "content": m.content }))
@@ -125,6 +191,9 @@ pub async fn chat_complete_messages(
 
     let text = extract_assistant_text(&parsed)
         .ok_or_else(|| "ai: response missing assistant text".to_string())?;
+    if text.is_empty() {
+        return Err(empty_reply_error(&parsed, max_tokens));
+    }
     let usage = parsed.get("usage").cloned().unwrap_or(Value::Null);
     let model_used = parsed
         .get("model")
@@ -146,6 +215,7 @@ pub async fn images_generate(
     quality: Option<&str>,
     timeout_ms: u64,
 ) -> Result<ImageResult, String> {
+    endpoint.require_openai("ai.image")?;
     let mut body = json!({
         "model": model,
         "prompt": prompt,
@@ -172,6 +242,7 @@ pub async fn images_edit(
     size: &str,
     timeout_ms: u64,
 ) -> Result<ImageResult, String> {
+    endpoint.require_openai("ai.image")?;
     let url = format!("{}/images/edits", endpoint.base_url);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms.max(5_000)))
@@ -231,6 +302,7 @@ pub async fn audio_speech(
     format: &str,
     timeout_ms: u64,
 ) -> Result<Vec<u8>, String> {
+    endpoint.require_openai("ai.audio")?;
     let body = json!({
         "model": model,
         "input": input,
@@ -271,6 +343,7 @@ pub async fn audio_transcribe(
     mime: &str,
     timeout_ms: u64,
 ) -> Result<String, String> {
+    endpoint.require_openai("ai.audio")?;
     let url = format!("{}/audio/transcriptions", endpoint.base_url);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms.max(5_000)))
@@ -326,6 +399,7 @@ pub async fn videos_generate(
     seconds: Option<u64>,
     timeout_ms: u64,
 ) -> Result<VideoJob, String> {
+    endpoint.require_openai("ai.video")?;
     let mut body = json!({
         "model": model,
         "prompt": prompt,
@@ -434,6 +508,26 @@ pub fn extract_assistant_text(parsed: &Value) -> Option<String> {
     }
 }
 
+/// Reasoning models can burn the whole budget before writing any answer.
+fn empty_reply_error(parsed: &Value, max_tokens: u64) -> String {
+    let finish = parsed
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let reasoning = parsed
+        .pointer("/usage/completion_tokens_details/reasoning_tokens")
+        .and_then(Value::as_u64);
+    match (finish, reasoning) {
+        ("length", Some(r)) => format!(
+            "ai: model spent the whole max_tokens ({max_tokens}) on reasoning ({r} tokens) — raise `max_tokens`"
+        ),
+        ("length", None) => {
+            format!("ai: response hit max_tokens ({max_tokens}) before any text — raise `max_tokens`")
+        }
+        _ => format!("ai: empty response (finish_reason: {finish})"),
+    }
+}
+
 pub fn extract_json_object(raw: &str) -> Option<Value> {
     let start = raw.find('{')?;
     let end = raw.rfind('}')?;
@@ -446,6 +540,16 @@ pub fn extract_json_object(raw: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_reasoning_reply_explains_budget() {
+        let v = json!({
+            "choices": [{ "message": { "content": "" }, "finish_reason": "length" }],
+            "usage": { "completion_tokens_details": { "reasoning_tokens": 6000 } }
+        });
+        assert_eq!(extract_assistant_text(&v).as_deref(), Some(""));
+        assert!(empty_reply_error(&v, 6000).contains("reasoning (6000 tokens)"));
+    }
 
     #[test]
     fn extracts_openai_content() {

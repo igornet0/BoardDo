@@ -288,12 +288,10 @@ pub async fn create_campaign(
     });
 
     if spec.openai_connection_id.is_none() {
-        if let Ok(list) = state.storage.list_connections_by_type("openai").await {
-            if let Some(c) = list.into_iter().find(|c| c.enabled) {
-                spec.openai_connection_id = Some(c.id);
-                spec.updated_at = Utc::now();
-                state.storage.update_goal_spec(&spec).await?;
-            }
+        if let Ok(Some(c)) = state.storage.first_llm_connection().await {
+            spec.openai_connection_id = Some(c.id);
+            spec.updated_at = Utc::now();
+            state.storage.update_goal_spec(&spec).await?;
         }
     }
 
@@ -310,12 +308,10 @@ pub async fn start_run(
         spec.updated_at = Utc::now();
         state.storage.update_goal_spec(spec).await?;
     } else if spec.openai_connection_id.is_none() {
-        if let Ok(list) = state.storage.list_connections_by_type("openai").await {
-            if let Some(c) = list.into_iter().find(|c| c.enabled) {
-                spec.openai_connection_id = Some(c.id);
-                spec.updated_at = Utc::now();
-                state.storage.update_goal_spec(spec).await?;
-            }
+        if let Ok(Some(c)) = state.storage.first_llm_connection().await {
+            spec.openai_connection_id = Some(c.id);
+            spec.updated_at = Utc::now();
+            state.storage.update_goal_spec(spec).await?;
         }
     }
 

@@ -274,6 +274,17 @@ impl Storage {
         rows.into_iter().map(row_to_lead).collect()
     }
 
+    /// All leads across runs (for CRM / sales metrics), newest activity first.
+    pub async fn list_all_leads(&self, include_simulated: bool) -> anyhow::Result<Vec<Lead>> {
+        let sql = if include_simulated {
+            "SELECT * FROM marketing_leads ORDER BY last_activity_at DESC"
+        } else {
+            "SELECT * FROM marketing_leads WHERE simulated = 0 ORDER BY last_activity_at DESC"
+        };
+        let rows: Vec<LeadRow> = sqlx::query_as(sql).fetch_all(&self.pool).await?;
+        rows.into_iter().map(row_to_lead).collect()
+    }
+
     pub async fn insert_research_note(&self, note: &ResearchNote) -> anyhow::Result<()> {
         sqlx::query(
             r#"

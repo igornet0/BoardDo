@@ -2,11 +2,14 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
 export class ApiError extends Error {
   status: number
+  /** Parsed JSON error body (`{ error, kind, details }`) when the server sent one. */
+  body?: Record<string, unknown>
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, body?: Record<string, unknown>) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.body = body
   }
 }
 
@@ -24,7 +27,16 @@ export async function request<T>(
 
   if (!res.ok) {
     const text = await res.text()
-    throw new ApiError(text || res.statusText, res.status)
+    let body: Record<string, unknown> | undefined
+    if (text.trim().startsWith('{')) {
+      try {
+        body = JSON.parse(text) as Record<string, unknown>
+      } catch {
+        body = undefined
+      }
+    }
+    const message = typeof body?.error === 'string' ? body.error : text || res.statusText
+    throw new ApiError(message, res.status, body)
   }
 
   if (res.status === 204) {

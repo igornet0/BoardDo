@@ -5,6 +5,7 @@ import { usePreferences } from '../settings/PreferencesContext'
 import type { MessageKey } from '../i18n/messages'
 import { Modal, useConfirm } from '../ui/Modal'
 import { Badge, Card, EmptyState, Field, Notice } from '../ui/primitives'
+import { CLAUDE_DEFAULT_MODEL, CLAUDE_MODELS } from '../api/connections'
 import { IconCheck, IconGlobe, IconKey, IconPlug, IconPlus, IconSend, IconSparkle, IconTrash, IconCode } from '../ui/icons'
 
 interface Props {
@@ -12,18 +13,20 @@ interface Props {
   onClose: () => void
 }
 
-type ConnType = 'http' | 'telegram' | 'openai' | 'github'
+type ConnType = 'http' | 'telegram' | 'openai' | 'anthropic' | 'github'
 
 const TYPES: { id: ConnType; icon: ReactNode; key: MessageKey }[] = [
   { id: 'http', icon: <IconGlobe size={16} />, key: 'connections.type.http' },
   { id: 'telegram', icon: <IconSend size={16} />, key: 'connections.type.telegram' },
   { id: 'openai', icon: <IconSparkle size={16} />, key: 'connections.type.openai' },
+  { id: 'anthropic', icon: <IconSparkle size={16} />, key: 'connections.type.anthropic' },
   { id: 'github', icon: <IconCode size={16} />, key: 'connections.type.github' },
 ]
 
 export function typeIcon(type: string, size = 15): ReactNode {
   if (type === 'telegram') return <IconSend size={size} />
-  if (type === 'openai' || type === 'ai') return <IconSparkle size={size} />
+  if (type === 'openai' || type === 'ai' || type === 'anthropic' || type === 'claude')
+    return <IconSparkle size={size} />
   if (type === 'github') return <IconCode size={size} />
   return <IconGlobe size={size} />
 }
@@ -32,6 +35,7 @@ const PLACEHOLDER: Record<ConnType, string> = {
   http: 'https://api.example.com',
   telegram: 'https://api.telegram.org',
   openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com/v1',
   github: 'https://api.github.com',
 }
 
@@ -68,7 +72,7 @@ export function ConnectionsPanel({ open, onClose }: Props) {
   function buildSecret() {
     if (!token) return undefined
     if (type === 'telegram') return { bot_token: token }
-    if (type === 'openai') return { api_key: token }
+    if (type === 'openai' || type === 'anthropic') return { api_key: token }
     if (type === 'github') return { token }
     return { auth: { type: 'bearer', token } }
   }
@@ -80,6 +84,13 @@ export function ConnectionsPanel({ open, onClose }: Props) {
         base_url: baseUrl || 'https://api.openai.com/v1',
         default_model: 'gpt-4o-mini',
         models: [{ id: 'gpt-4o-mini', capabilities: { chat: true } }],
+      }
+    if (type === 'anthropic')
+      return {
+        provider: 'anthropic',
+        base_url: baseUrl || 'https://api.anthropic.com/v1',
+        default_model: CLAUDE_DEFAULT_MODEL,
+        models: CLAUDE_MODELS,
       }
     if (type === 'github')
       return {
@@ -141,7 +152,7 @@ export function ConnectionsPanel({ open, onClose }: Props) {
   const secretLabel =
     type === 'telegram'
       ? t('connections.botToken')
-      : type === 'openai'
+      : type === 'openai' || type === 'anthropic'
         ? t('connections.apiKey')
         : type === 'github'
           ? t('connections.githubToken')
@@ -198,7 +209,7 @@ export function ConnectionsPanel({ open, onClose }: Props) {
               </Field>
               <Field
                 label={secretLabel}
-                hint={type === 'openai' ? t('connections.apiKeyHint') : type === 'github' ? t('connections.githubTokenHint') : t('connections.tokenHint')}
+                hint={type === 'anthropic' ? t('connections.claudeKeyHint') : type === 'openai' ? t('connections.apiKeyHint') : type === 'github' ? t('connections.githubTokenHint') : t('connections.tokenHint')}
               >
                 <input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
               </Field>

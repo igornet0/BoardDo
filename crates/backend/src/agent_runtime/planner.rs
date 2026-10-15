@@ -343,32 +343,13 @@ async fn llm_plan(
 ) -> Option<TickPlan> {
     let conn_id = spec.openai_connection_id?;
     let resolved = state.connections.resolve(&conn_id.to_string()).await.ok()?;
-    let api_key = resolved
-        .credentials
-        .get("api_key")
-        .or_else(|| resolved.credentials.get("token"))
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())?
-        .to_string();
-    let base_url = resolved
-        .config
-        .get("base_url")
-        .or_else(|| resolved.config.get("api_base"))
-        .and_then(Value::as_str)
-        .unwrap_or("https://api.openai.com/v1")
-        .trim_end_matches('/')
-        .to_string();
-    let model = resolved
-        .config
-        .get("default_model")
-        .and_then(Value::as_str)
-        .unwrap_or("gpt-4o-mini")
-        .to_string();
-    let endpoint = OpenAiEndpoint {
-        api_key,
-        base_url,
-        default_model: model.clone(),
-    };
+    let endpoint = OpenAiEndpoint::from_connection(
+        &resolved.connection_type,
+        &resolved.config,
+        &resolved.credentials,
+    )
+    .ok()?;
+    let model = endpoint.default_model.clone();
 
     let tools: Vec<&str> = spec.tools.iter().map(|t| t.type_id.as_str()).collect();
     let system = format!(

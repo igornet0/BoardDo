@@ -255,6 +255,48 @@ export function IconTarget(p: IconProps) {
   )
 }
 
+export function IconHub(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      <path d="m10 11-2 2 2 2" />
+      <path d="m14 11 2 2-2 2" />
+    </svg>
+  )
+}
+
+export function IconFlag(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M5 21V4" />
+      <path d="M5 4h11l-2 4 2 4H5" />
+    </svg>
+  )
+}
+
+export function IconSales(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M3 3v18h18" />
+      <path d="m7 15 4-4 3 3 6-6" />
+      <path d="M16 8h4v4" />
+    </svg>
+  )
+}
+
+export function IconListTree(p: IconProps) {
+  return (
+    <svg {...base(p)}>
+      <path d="M4 5h9" />
+      <path d="M8 12h12" />
+      <path d="M8 19h12" />
+      <path d="M4 5v14" />
+      <path d="M4 12h2" />
+      <path d="M4 19h2" />
+    </svg>
+  )
+}
+
 export function IconActivity(p: IconProps) {
   return (
     <svg {...base(p)}>
@@ -526,7 +568,8 @@ export function visualCategoryForType(typeId: string): NodeVisualCategory {
   if (typeId.startsWith('ai.')) return 'ai'
   if (
     typeId.startsWith('telegram.') ||
-    typeId.startsWith('telegram_user.')
+    typeId.startsWith('telegram_user.') ||
+    typeId.startsWith('projecthub.')
   ) {
     return 'integration'
   }
@@ -574,6 +617,10 @@ export function IconForType({
       return <IconBraces size={size} />
     case TYPE_IDS.DEBUG_LOG:
       return <IconLog size={size} />
+    case TYPE_IDS.TOOL_RUN:
+      return <IconWrench size={size} />
+    case TYPE_IDS.ALERTWIM_ALERT:
+      return <IconAlert size={size} />
     case TYPE_IDS.TELEGRAM_SEND_MESSAGE:
     case TYPE_IDS.TELEGRAM_USER_SEND_MESSAGE:
       return <IconMessage size={size} />
@@ -589,6 +636,23 @@ export function IconForType({
       return <IconTrash size={size} />
     case TYPE_IDS.TELEGRAM_USER_GET_CHAT_MEMBERS:
       return <IconUser size={size} />
+    case TYPE_IDS.PH_PROJECTS:
+    case TYPE_IDS.PH_PROJECT:
+      return <IconFolder size={size} />
+    case TYPE_IDS.PH_BRDD:
+      return <IconFlag size={size} />
+    case TYPE_IDS.PH_CODE:
+      return <IconCode size={size} />
+    case TYPE_IDS.PH_GIT:
+      return <IconSplit size={size} />
+    case TYPE_IDS.PH_TASKS:
+    case TYPE_IDS.PH_TASK_CREATE:
+    case TYPE_IDS.PH_TASK_UPDATE:
+      return <IconListTree size={size} />
+    case TYPE_IDS.PH_COMMAND:
+      return <IconTerminal size={size} />
+    case TYPE_IDS.PH_GITHUB:
+      return <IconCode size={size} />
     default:
       return <IconLog size={size} />
   }

@@ -223,7 +223,9 @@ export function GoalsPanel({ open, onClose, onOpenWorkflow }: Props) {
     if (!open || !selected?.spec.id) return
     void refreshDetail(selected.spec.id, selected.run?.id)
     const ws = new WebSocket(goalsWsUrl())
-    ws.onmessage = () => {
+    ws.onmessage = (ev) => {
+      // Objective (Goals tab) events share this socket — not ours.
+      if (String(ev.data).includes('"objective_updated"')) return
       void refreshDetail(selected.spec.id, selected.run?.id)
       void refreshList()
     }

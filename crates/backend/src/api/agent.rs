@@ -9,7 +9,7 @@ use axum::routing::{get, post};
 use boarddo_shared::{
     AgentChatRequest, AgentChatResponse, AgentGraphOp, AgentSettings, AgentSettingsTestResponse,
     AgentUsage, AgentWorkflowSnapshot, CreateConnectionRequest, Node, UpdateAgentSettingsRequest,
-    openai_base_url, openai_default_model, openai_models,
+    llm_base_url, llm_default_model, openai_models,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -120,10 +120,10 @@ pub async fn put_settings(
         let Some(conn) = conn else {
             return Err((StatusCode::BAD_REQUEST, "connection not found".into()));
         };
-        if conn.connection_type != "openai" && conn.connection_type != "ai" {
+        if !boarddo_shared::is_llm_connection_type(&conn.connection_type) {
             return Err((
                 StatusCode::BAD_REQUEST,
-                "connection must be type openai".into(),
+                "connection must be an AI provider (openai or anthropic)".into(),
             ));
         }
         if !conn.has_secret {
@@ -195,7 +195,14 @@ pub async fn chat(
     }
 
     let locale = req.locale.as_deref().unwrap_or("en");
-    let system = build_system_prompt(locale, &req.workflow, &req.selection.node_ids);
+    let projecthub = match crate::projecthub::hub() {
+        Some(hub) => {
+            let cfg = hub.config().await;
+            cfg.installed && cfg.enabled
+        }
+        None => false,
+    };
+    let system = build_system_prompt(locale, &req.workflow, &req.selection.node_ids, projecthub);
 
     let mut messages = vec![ChatMessage {
         role: "system".into(),
@@ -315,8 +322,8 @@ async fn to_public(state: &SharedState, stored: &StoredSettings) -> anyhow::Resu
         {
             out.has_connection = conn.has_secret && conn.enabled;
             out.connection_name = Some(conn.name);
-            out.base_url = Some(openai_base_url(&conn.config));
-            out.default_model = Some(openai_default_model(&conn.config));
+            out.base_url = Some(llm_base_url(&conn.connection_type, &conn.config));
+            out.default_model = Some(llm_default_model(&conn.connection_type, &conn.config));
             if out.model.is_none() {
                 out.model = out.default_model.clone();
             }
@@ -333,36 +340,19 @@ async fn resolve_endpoint(
         .connection_id
         .ok_or_else(|| "No openai connection selected for the AI agent".to_string())?;
     let resolved = state.connections.resolve(&id.to_string()).await?;
-    if resolved.connection_type != "openai" && resolved.connection_type != "ai" {
-        return Err(format!(
-            "connection `{}` must be type openai",
-            resolved.name
-        ));
-    }
-    let api_key = resolved
-        .credentials
-        .get("api_key")
-        .or_else(|| resolved.credentials.get("token"))
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "connection secret must include api_key".to_string())?
-        .to_string();
-    let base_url = openai_base_url(&resolved.config);
-    let default_model = openai_default_model(&resolved.config);
+    let endpoint = OpenAiEndpoint::from_connection(
+        &resolved.connection_type,
+        &resolved.config,
+        &resolved.credentials,
+    )
+    .map_err(|e| format!("connection `{}`: {e}", resolved.name))?;
     let model = stored
         .model
         .as_deref()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or(default_model.as_str())
+        .unwrap_or(endpoint.default_model.as_str())
         .to_string();
-    Ok((
-        OpenAiEndpoint {
-            api_key,
-            base_url,
-            default_model,
-        },
-        model,
-    ))
+    Ok((endpoint, model))
 }
 
 async fn load_stored(state: &SharedState) -> anyhow::Result<StoredSettings> {
@@ -436,7 +426,28 @@ fn validate_ops(
     crate::workflow::validate_ops(ops, workflow).map_err(|e| (StatusCode::BAD_REQUEST, e))
 }
 
-fn build_system_prompt(locale: &str, workflow: &AgentWorkflowSnapshot, selection: &[String]) -> String {
+fn build_system_prompt(
+    locale: &str,
+    workflow: &AgentWorkflowSnapshot,
+    selection: &[String],
+    projecthub: bool,
+) -> String {
+    let projecthub_types = if projecthub {
+        "\nprojecthub.projects, projecthub.project, projecthub.brdd, projecthub.code, projecthub.git, projecthub.tasks,\n\
+         projecthub.task.create, projecthub.task.update, projecthub.command, projecthub.github."
+    } else {
+        ""
+    };
+    let projecthub_notes = if projecthub {
+        "\n- ProjectHub (local code projects): `project` = project id or name. projecthub.projects {query, limit} → output.items; \
+         projecthub.project → commands, git, .brdd digest, tasks; projecthub.brdd {action: read|refresh|notes, notes} → .brdd analysis \
+         (summary_md, changelog_md, versions); projecthub.code {action: tree|file|search, path, query, depth} → read code; \
+         projecthub.git {limit}; projecthub.tasks {status, source}; projecthub.task.create {title, description, priority, github_issue} → output.id; \
+         projecthub.task.update {task_id, status: todo|in_progress|done|cancelled}; projecthub.command {command, fail_on_error} runs \
+         a project command (cargo test, npm run build); projecthub.github {action: sync|create_issue|issues, task_id}"
+    } else {
+        ""
+    };
     let lang = if locale.starts_with("ru") {
         "Reply in Russian."
     } else {
@@ -481,7 +492,7 @@ trigger.manual, trigger.webhook, trigger.schedule, trigger.telegram.user.message
 logic.condition, logic.delay, data.set, data.transform, http.request, debug.log,
 ai.chat, ai.classify, ai.analyze, ai.image, ai.audio, ai.video, web.search, web.open, web.extract, web.fetch,
 telegram.send_message, telegram.send_photo, telegram.send_document,
-telegram.user.send_message, telegram.user.forward_message, telegram.user.edit_message, telegram.user.delete_messages.
+telegram.user.send_message, telegram.user.forward_message, telegram.user.edit_message, telegram.user.delete_messages.{projecthub_types}
 
 Config notes:
 - Expressions use {{trigger.text}}, {{nodes.<id>.output.*}}, {{variables.*}}
@@ -491,7 +502,7 @@ Config notes:
 - web.open: url (string, list, or {{{{nodes.search.output.results}}}}), max_chars, selector (CSS), fields ("name: css" lines, "css@attr", "css[]" for all), render (auto|http|browser), structured (JSON-LD/meta/microdata/tables/embedded JSON → output.structured), browser-only: wait_for (CSS), wait_text, wait_js, network_idle_ms, wait_ms, script (JS → output.script_result), screenshot (→ output.screenshot media URI), capture_network (→ output.api_candidates with JSON), fetch_api; output.text / output.data / output.evidence / output.provenance / output.render; failed pages carry status blocked|rate_limited|not_found|challenge and retryable
 - web.extract: connection_id, model, url, instruction ("product name, price, availability"), schema ("name: description" lines), render, capture_network, strict; output.data, output.evidence (value, verified, source url/method/json_path/quote), output.unverified
 - ai.image modes: generate | edit; ai.audio modes: tts | transcribe; ai.video: prompt (+ optional image)
-- Prefer updating existing selected nodes over creating duplicates
+- Prefer updating existing selected nodes over creating duplicates{projecthub_notes}
 - If the user only asks a question, return ops: []
 
 Current workflow:

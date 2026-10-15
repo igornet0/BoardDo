@@ -323,6 +323,14 @@ pub enum GoalRuntimeEvent {
         run_id: Uuid,
         status: GoalRunStatus,
     },
+    /// Objective tree / status / progress changed (UI refetches).
+    ObjectiveUpdated {
+        objective_id: Uuid,
+        status: super::objective::ObjectiveStatus,
+        percent: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

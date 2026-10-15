@@ -9,16 +9,23 @@ import {
   type AgentSettings,
 } from '../api/agent'
 import {
+  CLAUDE_BASE_URL,
+  CLAUDE_DEFAULT_MODEL,
+  CLAUDE_MODELS,
   createConnection,
   getConnections,
+  isClaudeConnection,
+  isLlmConnection,
   updateConnection,
 } from '../api/connections'
 import type { Connection } from '../types'
 import { TelegramAccountsSection } from './TelegramAccountsPanel'
 import { TelegramBotsSection } from './TelegramBotsSection'
+import { AlertWimSection } from './AlertWimSection'
 import { Modal } from '../ui/Modal'
 import { Badge, Card, EmptyState, Field, Notice, Switch } from '../ui/primitives'
 import {
+  IconAlert,
   IconCheck,
   IconEdit,
   IconGlobe,
@@ -33,7 +40,7 @@ import {
 } from '../ui/icons'
 import type { ReactNode } from 'react'
 
-export type SettingsTab = 'theme' | 'agent' | 'telegram'
+export type SettingsTab = 'theme' | 'agent' | 'telegram' | 'alerts'
 
 interface Props {
   open: boolean
@@ -57,6 +64,7 @@ const TABS: { id: SettingsTab; key: MessageKey; hint: MessageKey; icon: ReactNod
   { id: 'theme', key: 'settings.tab.theme', hint: 'settings.tab.themeHint', icon: <IconPalette size={16} /> },
   { id: 'agent', key: 'settings.tab.agent', hint: 'settings.tab.agentHint', icon: <IconSparkle size={16} /> },
   { id: 'telegram', key: 'settings.tab.telegram', hint: 'settings.tab.telegramHint', icon: <IconSend size={16} /> },
+  { id: 'alerts', key: 'settings.tab.alerts', hint: 'settings.tab.alertsHint', icon: <IconAlert size={16} /> },
 ]
 
 type CapKey =
@@ -123,9 +131,11 @@ function buildOpenaiConfig(
   baseUrl: string,
   defaultModel: string,
   models: ModelDraft[],
+  claude = false,
 ): Record<string, unknown> {
   return {
-    base_url: baseUrl || 'https://api.openai.com/v1',
+    ...(claude ? { provider: 'anthropic' } : {}),
+    base_url: baseUrl || (claude ? CLAUDE_BASE_URL : 'https://api.openai.com/v1'),
     default_model: defaultModel || models[0]?.id || 'gpt-4o-mini',
     models: models
       .filter((m) => m.id.trim())
@@ -150,6 +160,7 @@ export function SettingsPanel({
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
+  const [newProvider, setNewProvider] = useState<'openai' | 'anthropic'>('openai')
   const [newName, setNewName] = useState('')
   const [newBaseUrl, setNewBaseUrl] = useState('https://api.openai.com/v1')
   const [newModel, setNewModel] = useState('gpt-4o-mini')
@@ -169,7 +180,7 @@ export function SettingsPanel({
     const [s, list] = await Promise.all([getAgentSettings(), getConnections()])
     setAgent(s)
     onAgentSettingsChange?.(s)
-    setConnections(list.filter((c) => c.type === 'openai' || c.type === 'ai'))
+    setConnections(list.filter(isLlmConnection))
   }
 
   useEffect(() => {
@@ -224,11 +235,14 @@ export function SettingsPanel({
     setBusy(true)
     setMsg(null)
     try {
-      const models = modelsFromConfig({ default_model: newModel })
+      const claude = newProvider === 'anthropic'
+      const models = claude
+        ? modelsFromConfig({ models: CLAUDE_MODELS })
+        : modelsFromConfig({ default_model: newModel })
       await createConnection({
-        name: newName.trim() || newBaseUrl || 'OpenAI',
-        type: 'openai',
-        config: buildOpenaiConfig(newBaseUrl, newModel, models),
+        name: newName.trim() || (claude ? 'Claude' : newBaseUrl || 'OpenAI'),
+        type: claude ? 'anthropic' : 'openai',
+        config: buildOpenaiConfig(newBaseUrl, newModel, models, claude),
         secret: newKey.trim() ? { api_key: newKey.trim() } : undefined,
         enabled: true,
       })
@@ -261,7 +275,7 @@ export function SettingsPanel({
       await updateConnection(editId, {
         name: existing.name,
         type: existing.type,
-        config: buildOpenaiConfig(editBaseUrl, editDefaultModel, editModels),
+        config: buildOpenaiConfig(editBaseUrl, editDefaultModel, editModels, isClaudeConnection(existing)),
         secret: editKey.trim() ? { api_key: editKey.trim() } : undefined,
         enabled: existing.enabled,
       })
@@ -564,12 +578,44 @@ export function SettingsPanel({
 
               <Card title={t('settings.agent.addProvider')}>
                 <div className="form">
+                  <div className="type-picker">
+                    {(['openai', 'anthropic'] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className={`type-picker__opt${newProvider === p ? ' is-active' : ''}`}
+                        onClick={() => {
+                          setNewProvider(p)
+                          if (p === 'anthropic') {
+                            setNewBaseUrl(CLAUDE_BASE_URL)
+                            setNewModel(CLAUDE_DEFAULT_MODEL)
+                          } else {
+                            setNewBaseUrl('https://api.openai.com/v1')
+                            setNewModel('gpt-4o-mini')
+                          }
+                        }}
+                      >
+                        <IconSparkle size={14} />
+                        <span>{t(p === 'anthropic' ? 'connections.type.anthropic' : 'connections.type.openai')}</span>
+                      </button>
+                    ))}
+                  </div>
                   <div className="form__row">
                     <Field label={t('connections.name')}>
-                      <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="OpenAI / DeepSeek" />
+                      <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={newProvider === 'anthropic' ? 'Claude' : 'OpenAI / DeepSeek'} />
                     </Field>
                     <Field label={t('connections.defaultModel')}>
-                      <input value={newModel} onChange={(e) => setNewModel(e.target.value)} spellCheck={false} />
+                      {newProvider === 'anthropic' ? (
+                        <select value={newModel} onChange={(e) => setNewModel(e.target.value)}>
+                          {CLAUDE_MODELS.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input value={newModel} onChange={(e) => setNewModel(e.target.value)} spellCheck={false} />
+                      )}
                     </Field>
                   </div>
                   <Field label={t('connections.baseUrl')}>
@@ -595,6 +641,8 @@ export function SettingsPanel({
               <TelegramAccountsSection active={open && tab === 'telegram'} />
             </>
           )}
+
+          {tab === 'alerts' && <AlertWimSection active={open && tab === 'alerts'} />}
         </div>
       </div>
     </Modal>

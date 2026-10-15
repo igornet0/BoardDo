@@ -29,6 +29,9 @@ import { ProjectsPanel } from './components/ProjectsPanel'
 import { RuntimePanel } from './components/RuntimePanel'
 import { ScenariosPanel } from './components/ScenariosPanel'
 import { GoalsPanel } from './components/GoalsPanel'
+import { ObjectivesPanel } from './components/ObjectivesPanel'
+import { SalesPanel } from './components/SalesPanel'
+import { ProjectHubPanel } from './components/ProjectHubPanel'
 import { ToolsPanel } from './components/ToolsPanel'
 import { SettingsPanel, type SettingsTab } from './components/SettingsPanel'
 import { AgentChatPanel } from './components/AgentChatPanel'
@@ -57,6 +60,9 @@ type Snapshot = { nodes: BoardNode[]; edges: Edge[] }
 type Panel =
   | 'projects'
   | 'scenarios'
+  | 'objectives'
+  | 'sales'
+  | 'projecthub'
   | 'goals'
   | 'tools'
   | 'runtime'
@@ -82,6 +88,7 @@ export default function App() {
   const [version, setVersion] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [panel, setPanel] = useState<Panel | null>(null)
+  const [objectiveFocus, setObjectiveFocus] = useState<string | null>(null)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('theme')
   const [showAgent, setShowAgent] = useState(false)
   const [agentSettings, setAgentSettings] = useState<AgentSettings | null>(null)
@@ -789,6 +796,9 @@ export default function App() {
         break
       case 'projects':
       case 'scenarios':
+      case 'objectives':
+      case 'sales':
+      case 'projecthub':
       case 'goals':
       case 'tools':
       case 'runtime':
@@ -1007,6 +1017,29 @@ export default function App() {
         open={panel === 'scenarios'}
         onClose={() => setPanel(null)}
         onUse={loadScenario}
+      />
+
+      <ProjectHubPanel
+        open={panel === 'projecthub'}
+        onClose={() => setPanel(null)}
+        onOpenGoal={(id) => {
+          setObjectiveFocus(id)
+          setPanel('objectives')
+        }}
+      />
+
+      <SalesPanel open={panel === 'sales'} onClose={() => setPanel(null)} />
+
+      <ObjectivesPanel
+        open={panel === 'objectives'}
+        focusId={objectiveFocus}
+        onOpenProjectHub={() => setPanel('projecthub')}
+        onClose={() => setPanel(null)}
+        onOpenWorkflow={(id) => {
+          void openWorkflow(id)
+          setPanel(null)
+        }}
+        onOpenAiSettings={() => openSettings('agent')}
       />
 
       <GoalsPanel

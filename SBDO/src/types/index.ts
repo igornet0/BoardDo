@@ -219,6 +219,7 @@ export const TYPE_IDS = {
   LOGIC_CONDITION: 'logic.condition',
   LOGIC_DELAY: 'logic.delay',
   DEBUG_LOG: 'debug.log',
+  TOOL_RUN: 'tool.run',
   HTTP_REQUEST: 'http.request',
   TELEGRAM_SEND_MESSAGE: 'telegram.send_message',
   TELEGRAM_SEND_PHOTO: 'telegram.send_photo',
@@ -231,6 +232,17 @@ export const TYPE_IDS = {
   TELEGRAM_USER_DELETE_MESSAGES: 'telegram.user.delete_messages',
   TELEGRAM_USER_GET_CHAT_MEMBERS: 'telegram.user.get_chat_members',
   GITHUB_GET_LATEST_RELEASE: 'github.get_latest_release',
+  ALERTWIM_ALERT: 'alertwim.alert',
+  PH_PROJECTS: 'projecthub.projects',
+  PH_PROJECT: 'projecthub.project',
+  PH_BRDD: 'projecthub.brdd',
+  PH_CODE: 'projecthub.code',
+  PH_GIT: 'projecthub.git',
+  PH_TASKS: 'projecthub.tasks',
+  PH_TASK_CREATE: 'projecthub.task.create',
+  PH_TASK_UPDATE: 'projecthub.task.update',
+  PH_COMMAND: 'projecthub.command',
+  PH_GITHUB: 'projecthub.github',
   AI_CHAT: 'ai.chat',
   AI_CLASSIFY: 'ai.classify',
   AI_ANALYZE: 'ai.analyze',
@@ -610,4 +622,271 @@ export interface ContentEngineSnapshot {
   graph_edges: Array<{ parent_id: string; child_id: string; relation: string }>
   publications: Array<{ content_id: string; channel: string; simulated: boolean }>
   insights: Array<{ observation: string; suggestion: string }>
+}
+
+// ─── Objectives (goal → items → scenarios) ────────────────────────────────────
+
+export type ObjectiveStatus = 'draft' | 'ready' | 'running' | 'paused' | 'done' | 'failed'
+export type ObjectiveItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
+export type ObjectiveItemKind = 'ai' | 'research' | 'workflow' | 'manual' | 'task'
+
+export interface ObjectiveCharacteristic {
+  key: string
+  value: string
+  unit?: string | null
+}
+
+export interface ObjectiveItem {
+  id: string
+  parent_id?: string | null
+  title: string
+  description: string
+  kind: ObjectiveItemKind
+  status: ObjectiveItemStatus
+  depends_on: string[]
+  prompt?: string | null
+  query?: string | null
+  workflow_id?: string | null
+  scenario_hash?: string | null
+  execution_id?: string | null
+  result?: string | null
+  error?: string | null
+  attempts: number
+  external_task_id?: string | null
+  external_status?: string | null
+  external_url?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export interface ObjectiveLogEntry {
+  at: string
+  level: 'info' | 'success' | 'warning' | 'error' | string
+  item_id?: string | null
+  message: string
+}
+
+export interface ObjectiveProgress {
+  total: number
+  done: number
+  failed: number
+  running: number
+  pending: number
+  percent: number
+}
+
+export interface Objective {
+  id: string
+  title: string
+  description: string
+  status: ObjectiveStatus
+  characteristics: ObjectiveCharacteristic[]
+  success_criteria: string[]
+  items: ObjectiveItem[]
+  connection_id?: string | null
+  model?: string | null
+  deadline?: string | null
+  project_hub_project_id?: string | null
+  project_hub_project_name?: string | null
+  summary?: string | null
+  achieved?: boolean | null
+  auto_refine: number
+  refine_rounds: number
+  log: ObjectiveLogEntry[]
+  progress: ObjectiveProgress
+  created_at: string
+  updated_at: string
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export interface ObjectiveInput {
+  title: string
+  description?: string
+  characteristics?: ObjectiveCharacteristic[]
+  success_criteria?: string[]
+  items?: ObjectiveItem[]
+  connection_id?: string | null
+  model?: string | null
+  deadline?: string | null
+  auto_refine?: number
+  project_hub_project_id?: string | null
+  project_hub_project_name?: string | null
+}
+
+export interface ObjectiveAssistRequest {
+  mode: 'fill' | 'decompose' | 'refine'
+  item_id?: string | null
+  instruction?: string | null
+  apply: boolean
+  locale?: string
+}
+
+export interface ObjectiveAssistResponse {
+  draft: { message: string }
+  objective: Objective
+  applied: boolean
+  model: string
+}
+
+export interface RunObjectiveRequest {
+  retry_failed?: boolean
+  reset?: boolean
+  item_id?: string | null
+}
+
+export interface UpdateObjectiveItemRequest {
+  status?: ObjectiveItemStatus
+  result?: string
+  workflow_id?: string
+  unlink_workflow?: boolean
+}
+
+// ----- Sales (CRM core) -----------------------------------------------------
+
+export interface Product {
+  id: string
+  name: string
+  description: string
+  price: number
+  cost: number
+  currency: string
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductInput {
+  name: string
+  description?: string
+  price?: number
+  cost?: number
+  currency?: string | null
+  active?: boolean | null
+}
+
+export type DealStage = 'new' | 'contacted' | 'proposal' | 'negotiation' | 'won' | 'lost'
+
+export const DEAL_STAGES: DealStage[] = ['new', 'contacted', 'proposal', 'negotiation', 'won', 'lost']
+
+export interface Deal {
+  id: string
+  title: string
+  product_id?: string | null
+  lead_id?: string | null
+  contact: string
+  source: string
+  stage: DealStage
+  quantity: number
+  amount: number
+  currency: string
+  notes: string
+  lost_reason?: string | null
+  created_at: string
+  updated_at: string
+  closed_at?: string | null
+}
+
+export interface CreateDealRequest {
+  title?: string
+  product_id?: string | null
+  lead_id?: string | null
+  contact?: string
+  source?: string
+  stage?: DealStage | null
+  quantity?: number | null
+  amount?: number | null
+  currency?: string | null
+  notes?: string
+}
+
+export interface UpdateDealRequest {
+  title?: string
+  product_id?: string
+  contact?: string
+  source?: string
+  quantity?: number
+  amount?: number
+  currency?: string
+  notes?: string
+}
+
+export interface DealEvent {
+  id: string
+  deal_id: string
+  kind: string
+  from_stage?: DealStage | null
+  to_stage?: DealStage | null
+  note?: string | null
+  at: string
+}
+
+export interface DealDetails {
+  deal: Deal
+  events: DealEvent[]
+}
+
+export interface SalesLead {
+  id: string
+  goal_id: string
+  run_id: string
+  source: string
+  source_reference?: string | null
+  chat_id?: string | null
+  account_id?: string | null
+  stage: 'cold' | 'interested' | 'qualified' | 'converted' | 'lost'
+  score: number
+  score_reasons: string[]
+  first_seen_at: string
+  last_activity_at: string
+  metadata: Record<string, unknown>
+  simulated: boolean
+}
+
+export interface SalesTotals {
+  deals: number
+  open: number
+  won: number
+  lost: number
+  revenue: number
+  gross_profit: number
+  pipeline_value: number
+  avg_deal: number
+  win_rate: number
+}
+
+export interface LeadInterest {
+  total: number
+  interested: number
+  qualified: number
+  converted: number
+  lost: number
+  lead_to_deal: number
+  lead_to_sale: number
+  by_source: { name: string; count: number }[]
+}
+
+export interface ProductSales {
+  product_id?: string | null
+  name: string
+  deals: number
+  open: number
+  won: number
+  lost: number
+  units: number
+  revenue: number
+  gross_profit: number
+  pipeline_value: number
+  win_rate: number
+}
+
+export interface SalesSummary {
+  days: number
+  currency: string
+  totals: SalesTotals
+  leads: LeadInterest
+  by_product: ProductSales[]
+  by_source: { source: string; deals: number; won: number; revenue: number }[]
+  by_stage: { stage?: DealStage | null; count: number; amount: number }[]
+  daily: { date: string; new_deals: number; won: number; revenue: number }[]
 }

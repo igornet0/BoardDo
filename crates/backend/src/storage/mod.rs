@@ -15,6 +15,9 @@ pub(crate) mod content;
 mod custom_tools;
 mod goals;
 mod marketing;
+mod objectives;
+mod sales;
+pub use sales::DealFilter;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -334,6 +337,8 @@ impl Storage {
         self.migrate_marketing().await?;
         self.migrate_content_engine().await?;
         self.migrate_custom_tools().await?;
+        self.migrate_objectives().await?;
+        self.migrate_sales().await?;
 
         Ok(())
     }
@@ -736,15 +741,10 @@ impl Storage {
         error: Option<String>,
         node_executions: &[NodeExecution],
     ) -> anyhow::Result<()> {
+        // One transaction, status last: pollers that see a terminal status
+        // must also see every node output.
         let finished_at = Utc::now();
-        sqlx::query("UPDATE executions SET status = ?, error = ?, finished_at = ? WHERE id = ?")
-            .bind(exec_status_str(status))
-            .bind(&error)
-            .bind(finished_at.to_rfc3339())
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await?;
-
+        let mut tx = self.pool.begin().await?;
         for ne in node_executions {
             sqlx::query(
                 "INSERT INTO node_executions
@@ -761,9 +761,17 @@ impl Storage {
             .bind(ne.started_at.to_rfc3339())
             .bind(ne.finished_at.map(|t| t.to_rfc3339()))
             .bind(ne.duration_ms.map(|d| d as i64))
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         }
+        sqlx::query("UPDATE executions SET status = ?, error = ?, finished_at = ? WHERE id = ?")
+            .bind(exec_status_str(status))
+            .bind(&error)
+            .bind(finished_at.to_rfc3339())
+            .bind(id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -1059,6 +1067,13 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(row_to_connection).collect()
+    }
+
+    /// First enabled AI connection with a stored key (OpenAI-compatible or Claude).
+    pub async fn first_llm_connection(&self) -> anyhow::Result<Option<Connection>> {
+        Ok(self.list_connections().await?.into_iter().find(|c| {
+            c.enabled && c.has_secret && boarddo_shared::is_llm_connection_type(&c.connection_type)
+        }))
     }
 
     pub async fn get_node_state(&self, key: &str) -> anyhow::Result<Option<String>> {

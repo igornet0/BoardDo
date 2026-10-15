@@ -3,9 +3,7 @@
 //! Credentials come from a connection of type `openai` (`api_key` secret).
 
 use async_trait::async_trait;
-use boarddo_shared::{
-    Node, openai_base_url, openai_default_model, require_openai_capability, type_ids,
-};
+use boarddo_shared::{Node, require_openai_capability, type_ids};
 use serde_json::{Value, json};
 
 use crate::engine::context::ExecutionContext;
@@ -223,38 +221,21 @@ async fn openai_from_ctx_full(
         .ok_or_else(|| format!("{kind}: `connection_id` is required"))?;
 
     let resolved = ctx.connections.resolve(connection_id).await?;
-    if resolved.connection_type != "openai" && resolved.connection_type != "ai" {
+    if !boarddo_shared::is_llm_connection_type(&resolved.connection_type) {
         return Err(format!(
-            "{kind}: connection `{}` must be type `openai` (got `{}`)",
+            "{kind}: connection `{}` must be an AI provider (openai / anthropic, got `{}`)",
             resolved.name, resolved.connection_type
         ));
     }
-
-    let api_key = resolved
-        .credentials
-        .get("api_key")
-        .or_else(|| resolved.credentials.get("token"))
-        .and_then(Value::as_str)
-        .or_else(|| {
-            resolved
-                .credentials
-                .get("auth")
-                .and_then(|a| a.get("token"))
-                .and_then(Value::as_str)
-        })
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("{kind}: connection secret must include `api_key`"))?
-        .to_string();
-
-    let base_url = openai_base_url(&resolved.config);
-    let default_model = openai_default_model(&resolved.config);
+    let endpoint = OpenAiEndpoint::from_connection(
+        &resolved.connection_type,
+        &resolved.config,
+        &resolved.credentials,
+    )
+    .map_err(|e| format!("{kind}: {e}"))?;
 
     Ok((
-        OpenAiEndpoint {
-            api_key,
-            base_url,
-            default_model,
-        },
+        endpoint,
         resolved.config,
     ))
 }

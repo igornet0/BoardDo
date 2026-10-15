@@ -857,17 +857,12 @@ async fn asset_generate(
         .or_else(|| spec.openai_connection_id.map(|id| id.to_string()))
         .ok_or_else(|| "asset.generate: missing connection_id".to_string())?;
     let resolved = state.connections.resolve(&connection_id).await?;
-    let api_key = resolved
-        .credentials
-        .get("api_key")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "asset.generate: connection needs api_key".to_string())?
-        .to_string();
-    let endpoint = OpenAiEndpoint {
-        api_key,
-        base_url: boarddo_shared::openai_base_url(&resolved.config),
-        default_model: boarddo_shared::openai_default_model(&resolved.config),
-    };
+    let endpoint = OpenAiEndpoint::from_connection(
+        &resolved.connection_type,
+        &resolved.config,
+        &resolved.credentials,
+    )
+    .map_err(|e| format!("asset.generate: {e}"))?;
     let model = config
         .get("model")
         .and_then(Value::as_str)

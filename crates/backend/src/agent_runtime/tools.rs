@@ -113,6 +113,7 @@ impl ToolGateway {
                 marketing_leads(state, spec, run, &call.type_id, &call.config).await
             }
             "tool.create"
+            | "tool.generate"
             | "tool.update"
             | "tool.test"
             | "tool.run"

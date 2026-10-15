@@ -6,6 +6,10 @@ mod goals;
 mod health;
 mod ingress;
 mod media;
+mod objectives;
+mod sales;
+mod projecthub;
+mod alertwim;
 pub(crate) mod run;
 mod runtime;
 mod telegram;
@@ -172,14 +176,25 @@ pub fn router(state: SharedState) -> Router {
         .route("/ws", get(websockets::ws_handler))
         .route("/ws/telegram", get(websockets::telegram_ws_handler))
         .route("/ws/goals", get(websockets::goals_ws_handler))
-        .route("/api/tools", get(tools::list).post(tools::create))
-        .route("/api/tools/find", get(tools::find))
-        .route("/api/tools/{id}", get(tools::get).delete(tools::delete))
-        .route("/api/tools/{id}/run", post(tools::run))
-        .route("/api/tools/{id}/test", post(tools::test_run))
+        .merge(
+            Router::new()
+                .route("/api/tools", get(tools::list).post(tools::create))
+                .route("/api/tools/find", get(tools::find))
+                .route("/api/tools/generate", post(tools::generate))
+                .route("/api/tools/runtime", get(tools::runtime).put(tools::set_runtime))
+                .route("/api/tools/runtime/venv", post(tools::create_venv))
+                .route("/api/tools/{id}", get(tools::get).put(tools::update).delete(tools::delete))
+                .route("/api/tools/{id}/run", post(tools::run))
+                .route("/api/tools/{id}/test", post(tools::test_run))
+                .layer(axum::extract::DefaultBodyLimit::max(tools::BODY_LIMIT)),
+        )
         .route("/api/media/{name}", get(media::get_media))
         .nest("/api/agent", agent::router())
         .nest("/api", goals::router())
+        .nest("/api", objectives::router())
+        .nest("/api", sales::router())
+        .nest("/api", projecthub::router())
+        .nest("/api", alertwim::router())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

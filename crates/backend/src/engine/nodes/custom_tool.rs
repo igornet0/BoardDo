@@ -29,6 +29,15 @@ impl NodeHandler for CustomToolRunNode {
         let input = ctx.resolve_value(raw_input)?;
 
         let result = ctx.custom_tools.run_by_name(name, input).await?;
+        // A failed run fails the node (and the scenario) unless the scenario handles it.
+        let fail_on_error = node.config.get("fail_on_error").and_then(Value::as_bool).unwrap_or(true);
+        if fail_on_error && result.get("status").and_then(Value::as_str) == Some("failed") {
+            return Err(format!(
+                "tool `{name}` failed: {}: {}",
+                result.get("error_type").and_then(Value::as_str).unwrap_or("Error"),
+                result.get("message").and_then(Value::as_str).unwrap_or("no message")
+            ));
+        }
         Ok(NodeOutput::data(result))
     }
 }

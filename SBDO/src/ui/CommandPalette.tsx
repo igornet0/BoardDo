@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { PALETTE, type PaletteItem } from '../canvas/paletteItems'
+import { PALETTE, availablePalette, integrationGroupFor, type PaletteItem } from '../canvas/paletteItems'
+import { useExtensions } from '../extensions/ExtensionsContext'
 import { usePreferences } from '../settings/PreferencesContext'
 import { MOD } from './format'
 import {
   IconActivity,
   IconCommand,
+  IconFlag,
+  IconSales,
   IconFlask,
   IconFolder,
   IconForType,
@@ -31,6 +34,9 @@ export type CommandAction =
   | { kind: 'save' }
   | { kind: 'projects' }
   | { kind: 'scenarios' }
+  | { kind: 'objectives' }
+  | { kind: 'sales' }
+  | { kind: 'projecthub' }
   | { kind: 'goals' }
   | { kind: 'tools' }
   | { kind: 'runtime' }
@@ -69,6 +75,7 @@ export function CommandPalette({
   mode = 'command',
 }: Props) {
   const { t } = usePreferences()
+  const { projecthubReady } = useExtensions()
   const [query, setQuery] = useState(initialQuery)
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -83,11 +90,14 @@ export function CommandPalette({
 
   const entries = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const nodeEntries: Entry[] = PALETTE.map((item) => ({
+    const nodeEntries: Entry[] = availablePalette(PALETTE, projecthubReady).map((item) => ({
       id: `node:${item.typeId}`,
       label: t(item.labelKey),
       hint: item.typeId,
-      group: t('cmd.group.nodes'),
+      group: (() => {
+        const integration = integrationGroupFor(item)
+        return integration ? `${t('cmd.group.nodes')} · ${t(integration)}` : t('cmd.group.nodes')
+      })(),
       action: { kind: 'add-node', item },
       icon: (
         <span className={`palette__item-icon palette__item-icon--${visualCategoryForType(item.typeId)}`}>
@@ -137,6 +147,27 @@ export function CommandPalette({
               label: t('app.scenarios'),
               group: t('cmd.group.navigate'),
               action: { kind: 'scenarios' },
+            },
+            {
+              id: 'objectives',
+              icon: <IconFlag size={14} />,
+              label: t('app.objectives'),
+              group: t('cmd.group.navigate'),
+              action: { kind: 'objectives' },
+            },
+            {
+              id: 'sales',
+              icon: <IconSales size={14} />,
+              label: t('app.sales'),
+              group: t('cmd.group.navigate'),
+              action: { kind: 'sales' },
+            },
+            {
+              id: 'projecthub',
+              icon: <IconFolder size={14} />,
+              label: t('app.projecthub'),
+              group: t('cmd.group.navigate'),
+              action: { kind: 'projecthub' },
             },
             {
               id: 'goals',
@@ -225,7 +256,7 @@ export function CommandPalette({
         (e.hint?.toLowerCase().includes(q) ?? false) ||
         e.group.toLowerCase().includes(q),
     )
-  }, [query, t, mode])
+  }, [query, t, mode, projecthubReady])
 
   useEffect(() => {
     setActive(0)

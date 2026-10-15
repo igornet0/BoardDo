@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react'
-import { PALETTE, type PaletteItem } from './paletteItems'
+import {
+  INTEGRATION_GROUPS,
+  PALETTE,
+  availablePalette,
+  integrationGroupFor,
+  type IntegrationGroup,
+  type PaletteItem,
+} from './paletteItems'
+import { useExtensions } from '../extensions/ExtensionsContext'
 import { usePreferences } from '../settings/PreferencesContext'
 import { SearchInput } from '../ui/primitives'
 import { MOD } from '../ui/format'
@@ -17,12 +25,16 @@ interface Props {
   onClose?: () => void
 }
 
-const CATEGORY_ORDER: NodeVisualCategory[] = [
+type Section = NodeVisualCategory | IntegrationGroup
+
+/** Core categories first, then one section per integration, then other integrations. */
+const SECTION_ORDER: Section[] = [
   'trigger',
   'logic',
   'data',
   'ai',
   'action',
+  ...INTEGRATION_GROUPS,
   'integration',
 ]
 
@@ -39,24 +51,26 @@ export function NodePalette({ onAdd, onOpenSearch, onClose }: Props) {
   const { t } = usePreferences()
   const [query, setQuery] = useState('')
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(CATEGORY_ORDER.map((c) => [c, true])),
+    Object.fromEntries(SECTION_ORDER.map((c) => [c, true])),
   )
 
+  const { projecthubReady } = useExtensions()
+  const items = useMemo(() => availablePalette(PALETTE, projecthubReady), [projecthubReady])
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return PALETTE
-    return PALETTE.filter((item) => {
+    if (!q) return items
+    return items.filter((item) => {
       const label = t(item.labelKey).toLowerCase()
       return label.includes(q) || item.typeId.toLowerCase().includes(q)
     })
-  }, [query, t])
+  }, [query, t, items])
 
-  const byCategory = useMemo(() => {
-    const map = new Map<NodeVisualCategory, PaletteItem[]>()
-    for (const cat of CATEGORY_ORDER) map.set(cat, [])
+  const bySection = useMemo(() => {
+    const map = new Map<Section, PaletteItem[]>()
+    for (const section of SECTION_ORDER) map.set(section, [])
     for (const item of filtered) {
-      const cat = visualCategoryForType(item.typeId)
-      map.get(cat)?.push(item)
+      const section = integrationGroupFor(item) ?? visualCategoryForType(item.typeId)
+      map.get(section)?.push(item)
     }
     return map
   }, [filtered])
@@ -88,17 +102,18 @@ export function NodePalette({ onAdd, onOpenSearch, onClose }: Props) {
       <p className="palette__tip">{t('palette.tip')}</p>
 
       <div className="palette__groups">
-        {CATEGORY_ORDER.map((cat) => {
-          const items = byCategory.get(cat) ?? []
+        {SECTION_ORDER.map((section) => {
+          const items = bySection.get(section) ?? []
           if (!items.length) return null
-          const isOpen = openGroups[cat] ?? true
+          const isOpen = openGroups[section] ?? true
+          const title = section in CATEGORY_KEYS ? t(CATEGORY_KEYS[section as NodeVisualCategory]) : t(section as MessageKey)
           return (
-            <div key={cat} className="palette__group">
+            <div key={section} className="palette__group">
               <button
                 type="button"
                 className="palette__group-toggle"
                 onClick={() =>
-                  setOpenGroups((g) => ({ ...g, [cat]: !isOpen }))
+                  setOpenGroups((g) => ({ ...g, [section]: !isOpen }))
                 }
                 aria-expanded={isOpen}
               >
@@ -108,11 +123,13 @@ export function NodePalette({ onAdd, onOpenSearch, onClose }: Props) {
                     transform: isOpen ? undefined : 'rotate(-90deg)',
                   }}
                 />
-                <span>{t(CATEGORY_KEYS[cat])}</span>
+                <span>{title}</span>
                 <span className="palette__group-count">{items.length}</span>
               </button>
               {isOpen &&
-                items.map((item) => (
+                items.map((item) => {
+                  const cat = visualCategoryForType(item.typeId)
+                  return (
                   <button
                     key={item.typeId}
                     type="button"
@@ -133,7 +150,8 @@ export function NodePalette({ onAdd, onOpenSearch, onClose }: Props) {
                     <span className="palette__item-label">{t(item.labelKey)}</span>
                     <span className="palette__item-add" aria-hidden>+</span>
                   </button>
-                ))}
+                  )
+                })}
             </div>
           )
         })}

@@ -1,10 +1,12 @@
 mod ai;
+pub mod alertwim;
 mod condition;
 mod custom_tool;
 mod delay;
 mod github;
 mod http;
 mod log;
+pub mod projecthub;
 mod set;
 mod telegram;
 mod telegram_user;
@@ -13,6 +15,7 @@ mod trigger;
 mod web;
 mod web_extract;
 
+pub use alertwim::AlertWimAlertNode;
 pub use ai::{AiAnalyzeNode, AiAudioNode, AiChatNode, AiClassifyNode, AiImageNode, AiVideoNode};
 pub use condition::ConditionNode;
 pub use custom_tool::CustomToolRunNode;
@@ -20,6 +23,7 @@ pub use delay::DelayNode;
 pub use github::GitHubGetLatestRelease;
 pub use http::HttpRequestNode;
 pub use log::LogNode;
+pub use projecthub::ProjectHubNode;
 pub use set::SetDataNode;
 pub use telegram::{TelegramSendDocument, TelegramSendMessage, TelegramSendPhoto};
 pub use telegram_user::{

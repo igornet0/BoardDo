@@ -63,23 +63,133 @@ impl AiModelEntry {
     }
 }
 
+pub const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+pub const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/v1";
+pub const OPENAI_DEFAULT_MODEL: &str = "gpt-4o-mini";
+pub const CLAUDE_DEFAULT_MODEL: &str = "claude-opus-5-5";
+
+/// Chat model families BoardDo can talk to through an LLM connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmProvider {
+    /// OpenAI Chat Completions or any compatible gateway (DeepSeek, OpenRouter, …).
+    #[default]
+    Openai,
+    /// Anthropic Messages API (Claude).
+    Anthropic,
+}
+
+impl LlmProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Openai => "openai",
+            Self::Anthropic => "anthropic",
+        }
+    }
+}
+
+/// Connection types that carry LLM credentials (`api_key`).
+pub fn is_llm_connection_type(connection_type: &str) -> bool {
+    matches!(connection_type, "openai" | "ai" | "anthropic" | "claude")
+}
+
+/// Provider for an LLM connection: explicit type / `config.provider`, then base URL.
+pub fn llm_provider(connection_type: &str, config: &Value) -> LlmProvider {
+    if matches!(connection_type, "anthropic" | "claude") {
+        return LlmProvider::Anthropic;
+    }
+    config_provider(config)
+}
+
+fn config_provider(config: &Value) -> LlmProvider {
+    let explicit = config
+        .get("provider")
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_ascii_lowercase());
+    match explicit.as_deref() {
+        Some("anthropic" | "claude") => return LlmProvider::Anthropic,
+        Some("openai") => return LlmProvider::Openai,
+        _ => {}
+    }
+    let base = config
+        .get("base_url")
+        .or_else(|| config.get("api_base"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if base.contains("anthropic.com") {
+        LlmProvider::Anthropic
+    } else {
+        LlmProvider::Openai
+    }
+}
+
+/// Base URL for any LLM connection (connection type wins over config defaults).
+pub fn llm_base_url(connection_type: &str, config: &Value) -> String {
+    if llm_provider(connection_type, config) == LlmProvider::Anthropic && !has_str(config, "base_url") && !has_str(config, "api_base") {
+        return ANTHROPIC_BASE_URL.to_string();
+    }
+    openai_base_url(config)
+}
+
+/// Default chat model for any LLM connection.
+pub fn llm_default_model(connection_type: &str, config: &Value) -> String {
+    if llm_provider(connection_type, config) == LlmProvider::Anthropic && !has_str(config, "default_model") {
+        return CLAUDE_DEFAULT_MODEL.to_string();
+    }
+    openai_default_model(config)
+}
+
+fn has_str(config: &Value, key: &str) -> bool {
+    config
+        .get(key)
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.trim().is_empty())
+}
+
+/// Claude chat models offered by default on a new Anthropic connection.
+pub fn claude_default_models() -> Vec<AiModelEntry> {
+    [
+        ("claude-opus-5-5", "Claude Opus 5.5"),
+        ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+        ("claude-haiku-4-5", "Claude Haiku 4.5"),
+        ("claude-fable-5-1", "Claude Fable 5.1"),
+    ]
+    .into_iter()
+    .map(|(id, label)| AiModelEntry {
+        id: id.into(),
+        label: Some(label.into()),
+        capabilities: AiModelCapabilities::chat_only(),
+    })
+    .collect()
+}
+
 /// Parse openai connection config helpers.
 pub fn openai_base_url(config: &Value) -> String {
+    let fallback = match config_provider(config) {
+        LlmProvider::Anthropic => ANTHROPIC_BASE_URL,
+        LlmProvider::Openai => OPENAI_BASE_URL,
+    };
     config
         .get("base_url")
         .or_else(|| config.get("api_base"))
         .and_then(Value::as_str)
-        .unwrap_or("https://api.openai.com/v1")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(fallback)
         .trim_end_matches('/')
         .to_string()
 }
 
 pub fn openai_default_model(config: &Value) -> String {
+    let fallback = match config_provider(config) {
+        LlmProvider::Anthropic => CLAUDE_DEFAULT_MODEL,
+        LlmProvider::Openai => OPENAI_DEFAULT_MODEL,
+    };
     config
         .get("default_model")
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or("gpt-4o-mini")
+        .unwrap_or(fallback)
         .to_string()
 }
 

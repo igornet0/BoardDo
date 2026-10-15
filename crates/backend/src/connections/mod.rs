@@ -196,16 +196,38 @@ impl StorageConnectionProvider {
                 },
                 Err(e) => Ok((false, format!("telegram {}: {e}", e.kind()))),
             }
-        } else if conn.connection_type == "openai" || conn.connection_type == "ai" {
-            let api_key = credentials
-                .get("api_key")
-                .or_else(|| credentials.get("token"))
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty());
-            if api_key.is_none() {
-                return Ok((false, "openai connection requires api_key in secret".into()));
+        } else if boarddo_shared::is_llm_connection_type(&conn.connection_type) {
+            let endpoint = match crate::integrations::openai::OpenAiEndpoint::from_connection(
+                &conn.connection_type,
+                &conn.config,
+                &credentials,
+            ) {
+                Ok(e) => e,
+                Err(err) => return Ok((false, err)),
+            };
+            let model = endpoint.default_model.clone();
+            match crate::integrations::openai::chat_complete(
+                &endpoint,
+                &model,
+                "You are a BoardDo health check. Reply with the single word pong.",
+                "ping",
+                0.0,
+                // Reasoning models think before answering even a ping.
+                1024,
+                60_000,
+            )
+            .await
+            {
+                Ok((text, _, used)) => Ok((
+                    true,
+                    format!(
+                        "{} ok ({used}): {}",
+                        endpoint.provider.as_str(),
+                        text.chars().take(40).collect::<String>()
+                    ),
+                )),
+                Err(err) => Ok((false, err)),
             }
-            Ok((true, "openai credentials readable".into()))
         } else if conn.connection_type == "github" {
             match crate::integrations::github::GitHubClient::from_resolved(
                 &conn.config,

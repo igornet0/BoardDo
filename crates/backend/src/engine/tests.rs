@@ -165,6 +165,12 @@ mod tests {
         ctx.set_variable("name", json!("Igor"));
         assert_eq!(ctx.resolve_template("Hello {{name}}"), json!("Hello Igor"));
         assert_eq!(ctx.resolve_template("{{name}}"), json!("Igor"));
+        // Nested objects / arrays (tool inputs, JSON bodies) resolve too, keeping value types.
+        ctx.set_variable("n", json!(5));
+        let v = ctx
+            .resolve_value(json!({ "who": "{{name}}", "list": ["{{n}}", "x {{n}}"], "deep": { "k": "{{n}}" }, "num": 1 }))
+            .unwrap();
+        assert_eq!(v, json!({ "who": "Igor", "list": [5, "x 5"], "deep": { "k": 5 }, "num": 1 }));
     }
 
     #[tokio::test]

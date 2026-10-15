@@ -15,22 +15,27 @@ pub async fn execute(
     match normalize(type_id) {
         "tool.create" => {
             let req = parse_create(config)?;
-            svc.create_tool(req, "agent", ToolOrigin::Agent).await
+            Ok(svc.create_tool(req, "agent", ToolOrigin::Agent).await?)
+        }
+        "tool.generate" => {
+            let req: crate::tools::generate::GenerateToolRequest = serde_json::from_value(config.clone())
+                .map_err(|e| format!("tool.generate: {e}"))?;
+            Ok(crate::tools::generate::generate(state, req).await?)
         }
         "tool.update" => {
             let name = str_field(config, "name").or_else(|_| str_field(config, "tool_id"))?;
             let req = parse_create(config)?;
-            svc.update_tool(&name, req, "agent").await
+            Ok(svc.update_tool(&name, req, "agent").await?)
         }
         "tool.test" | "tool.test_tool" => {
             let name = tool_ref(config)?;
             let input = config.get("input").cloned().unwrap_or(json!({}));
-            svc.test_tool(&name, input).await
+            Ok(svc.test_tool(&name, input).await?)
         }
         "tool.run" => {
             let name = tool_ref(config)?;
             let input = config.get("input").cloned().unwrap_or(json!({}));
-            svc.run_tool(&name, input).await
+            Ok(svc.run_tool(&name, input).await?)
         }
         "tool.list" => {
             let tools = svc.list().await?;
@@ -62,7 +67,7 @@ pub async fn execute(
         }
         "tool.delete" => {
             let name = tool_ref(config)?;
-            svc.delete_tool(&name).await
+            Ok(svc.delete_tool(&name).await?)
         }
         other => Err(format!("unknown tool op `{other}`")),
     }
@@ -71,6 +76,7 @@ pub async fn execute(
 fn normalize(type_id: &str) -> &str {
     match type_id {
         "create_tool" => "tool.create",
+        "generate_tool" => "tool.generate",
         "update_tool" => "tool.update",
         "test_tool" => "tool.test",
         "run_tool" => "tool.run",
@@ -126,6 +132,11 @@ fn parse_create(config: &Value) -> Result<CreateToolRequest, String> {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_else(ToolPermissions::locked_down),
         test_input: config.get("test_input").cloned(),
+        tests: config
+            .get("tests")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        runtime: config.get("runtime").and_then(|v| serde_json::from_value(v.clone()).ok()),
         purpose: config
             .get("purpose")
             .and_then(Value::as_str)

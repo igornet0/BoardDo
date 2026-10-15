@@ -18,6 +18,10 @@ pub struct MessageTriggerFilter {
     /// Prevents echo / AI-reply loops. Set false for Saved Messages self-triggers
     /// (BoardDo-sent replies are still suppressed separately).
     pub ignore_outgoing: bool,
+    /// When false (default), messages dated before the scenario started are
+    /// dropped — TDLib replays missed updates on connect and they must not
+    /// fire a freshly started scenario.
+    pub process_backlog: bool,
 }
 
 impl Default for MessageTriggerFilter {
@@ -29,6 +33,7 @@ impl Default for MessageTriggerFilter {
             ignore_chat_ids: Vec::new(),
             text_contains: None,
             ignore_outgoing: true,
+            process_backlog: false,
         }
     }
 }
@@ -64,6 +69,10 @@ impl MessageTriggerFilter {
             .get("ignore_outgoing")
             .and_then(Value::as_bool)
             .unwrap_or(true);
+        let process_backlog = config
+            .get("process_backlog")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         Self {
             account_id,
             chat_id,
@@ -71,6 +80,7 @@ impl MessageTriggerFilter {
             ignore_chat_ids,
             text_contains,
             ignore_outgoing,
+            process_backlog,
         }
     }
 }

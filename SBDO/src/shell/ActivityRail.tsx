@@ -3,10 +3,13 @@ import { usePreferences } from '../settings/PreferencesContext'
 import type { MessageKey } from '../i18n/messages'
 import {
   IconActivity,
+  IconFlag,
   IconFolder,
+  IconHub,
   IconMoon,
   IconPlug,
   IconRadio,
+  IconSales,
   IconSend,
   IconSettings,
   IconSidebar,
@@ -20,10 +23,13 @@ import {
 export type RailTarget =
   | 'projects'
   | 'scenarios'
+  | 'objectives'
+  | 'sales'
   | 'goals'
   | 'runtime'
   | 'ingress'
   | 'connections'
+  | 'projecthub'
   | 'tools'
   | 'telegram'
   | 'settings'
@@ -42,11 +48,14 @@ interface Props {
 const MAIN: { id: RailTarget; key: MessageKey; icon: ReactNode }[] = [
   { id: 'projects', key: 'nav.projects', icon: <IconFolder size={18} /> },
   { id: 'scenarios', key: 'nav.scenarios', icon: <IconTemplate size={18} /> },
+  { id: 'objectives', key: 'nav.objectives', icon: <IconFlag size={18} /> },
+  { id: 'sales', key: 'nav.sales', icon: <IconSales size={18} /> },
   { id: 'goals', key: 'nav.goals', icon: <IconTarget size={18} /> },
   { id: 'runtime', key: 'nav.runtime', icon: <IconActivity size={18} /> },
 ]
 
 const INTEGRATIONS: { id: RailTarget; key: MessageKey; icon: ReactNode }[] = [
+  { id: 'projecthub', key: 'nav.projecthub', icon: <IconHub size={18} /> },
   { id: 'ingress', key: 'nav.ingress', icon: <IconRadio size={18} /> },
   { id: 'connections', key: 'nav.connections', icon: <IconPlug size={18} /> },
   { id: 'telegram', key: 'nav.telegram', icon: <IconSend size={18} /> },

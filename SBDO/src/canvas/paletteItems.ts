@@ -7,6 +7,13 @@ export interface PaletteItem {
   category: NodeCategory
   groupKey: MessageKey
   defaultConfig: Record<string, unknown>
+  /** Shown only when this extension is enabled. */
+  requires?: 'projecthub'
+}
+
+/** Palette entries the current extension set allows. */
+export function availablePalette(items: PaletteItem[], projecthubReady: boolean): PaletteItem[] {
+  return items.filter((i) => !i.requires || (i.requires === 'projecthub' && projecthubReady))
 }
 
 export const PALETTE: PaletteItem[] = [
@@ -94,6 +101,93 @@ export const PALETTE: PaletteItem[] = [
       repo: '',
       track_new: true,
     },
+  },
+  {
+    typeId: TYPE_IDS.ALERTWIM_ALERT,
+    labelKey: 'palette.alertwim.alert',
+    category: 'action',
+    groupKey: 'palette.group.alertwim',
+    defaultConfig: { level: 'info', title: '', message: '{{message}}', source: '', show: true, launch: true },
+  },
+  {
+    typeId: TYPE_IDS.PH_PROJECTS,
+    labelKey: 'palette.ph.projects',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { query: '', limit: 50 },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_PROJECT,
+    labelKey: 'palette.ph.project',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { project: '' },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_BRDD,
+    labelKey: 'palette.ph.brdd',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { project: '', action: 'read' },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_CODE,
+    labelKey: 'palette.ph.code',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { project: '', action: 'tree', path: '', depth: 2 },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_GIT,
+    labelKey: 'palette.ph.git',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { project: '', limit: 20 },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_TASKS,
+    labelKey: 'palette.ph.tasks',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { project: '', status: '', source: '' },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_TASK_CREATE,
+    labelKey: 'palette.ph.taskCreate',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { project: '', title: '{{trigger.text}}', description: '', priority: 'medium', github_issue: false },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_TASK_UPDATE,
+    labelKey: 'palette.ph.taskUpdate',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { task_id: '', status: 'done' },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_COMMAND,
+    labelKey: 'palette.ph.command',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { project: '', command: '', timeout_secs: 300, fail_on_error: true },
+    requires: 'projecthub',
+  },
+  {
+    typeId: TYPE_IDS.PH_GITHUB,
+    labelKey: 'palette.ph.github',
+    category: 'action',
+    groupKey: 'palette.group.projecthub',
+    defaultConfig: { action: 'sync' },
+    requires: 'projecthub',
   },
   {
     typeId: TYPE_IDS.AI_CHAT,
@@ -275,6 +369,13 @@ export const PALETTE: PaletteItem[] = [
     },
   },
   {
+    typeId: TYPE_IDS.TOOL_RUN,
+    labelKey: 'palette.action.tool',
+    category: 'action',
+    groupKey: 'palette.group.actions',
+    defaultConfig: { tool_name: '', input: {}, fail_on_error: true },
+  },
+  {
     typeId: TYPE_IDS.DEBUG_LOG,
     labelKey: 'palette.action.log',
     category: 'action',
@@ -357,6 +458,25 @@ export const PALETTE: PaletteItem[] = [
     },
   },
 ]
+
+/** Integrations get their own palette section (in this order) instead of a shared "Actions". */
+export const INTEGRATION_GROUPS = [
+  'palette.group.alertwim',
+  'palette.group.github',
+  'palette.group.projecthub',
+  'palette.group.telegram',
+  'palette.group.telegramUser',
+] as const satisfies readonly MessageKey[]
+
+export type IntegrationGroup = (typeof INTEGRATION_GROUPS)[number]
+
+/** The integration section of a node; triggers stay with the other triggers. */
+export function integrationGroupFor(item: PaletteItem): IntegrationGroup | null {
+  if (item.category === 'trigger') return null
+  return (INTEGRATION_GROUPS as readonly MessageKey[]).includes(item.groupKey)
+    ? (item.groupKey as IntegrationGroup)
+    : null
+}
 
 export function labelKeyForType(typeId: string): MessageKey | null {
   return PALETTE.find((p) => p.typeId === typeId)?.labelKey ?? null

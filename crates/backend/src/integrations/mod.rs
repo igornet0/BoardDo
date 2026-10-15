@@ -1,5 +1,6 @@
 //! External service integrations (Telegram, web, GitHub, …).
 
+pub mod anthropic;
 pub mod browser;
 pub mod browser_supervisor;
 pub mod github;

@@ -33,9 +33,16 @@ pub fn resolve(ctx: &ExecutionContext, template: &str) -> Result<Value, String> 
 }
 
 /// Resolve a Value that may be a template string or a literal.
+/// Resolve templates in a string, or in every string inside arrays / objects.
 pub fn resolve_value(ctx: &ExecutionContext, raw: Value) -> Result<Value, String> {
     match raw {
         Value::String(s) => resolve(ctx, &s),
+        Value::Array(items) => items.into_iter().map(|v| resolve_value(ctx, v)).collect::<Result<_, _>>().map(Value::Array),
+        Value::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| resolve_value(ctx, v).map(|v| (k, v)))
+            .collect::<Result<serde_json::Map<_, _>, _>>()
+            .map(Value::Object),
         other => Ok(other),
     }
 }

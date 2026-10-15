@@ -173,7 +173,7 @@ cargo check -p smartdo --features tdlib   # requires tdjson
 | `telegram.user.forward_message` | User-account forward |
 | `telegram.user.edit_message` | User-account edit |
 | `telegram.user.delete_messages` | User-account delete |
-| `ai.chat` | OpenAI-compatible chat (`connection_id` + prompt) |
+| `ai.chat` | Chat on an AI connection — OpenAI-compatible or Claude (`connection_id` + prompt) |
 | `github.get_latest_release` | Latest GitHub release (`connection_id`, optional `owner`/`repo`, `track_new`) |
 | `debug.log` | Log message |
 
@@ -214,6 +214,143 @@ Separate from the canvas editor agent (`/api/agent/chat`). A GoalRun loops Obser
 
 Showcase: template `growth` — 10 interested users / 7 days / $0 / max 50 actions/day. Telegram outreach requires approval. Inbound messages containing `interested` / `хочу` increment the metric.
 
+### Goals (objectives)
+
+UI: rail **Goals** (flag icon). A goal is a tree of items plus characteristics, success
+criteria, deadline and the AI model to use:
+
+```
+Goal → ✦ AI fill (description, characteristics, criteria, items)
+     → ✦ split items into sub-items (max depth 3)
+     → Run: every leaf item executes through a scenario
+     → ✦ AI evaluation against the success criteria
+     → ✦ refine (optional, N auto rounds): gap-closing items, run continues
+```
+
+| Item kind | Scenario |
+|-----------|----------|
+| `ai` | generated: `trigger.manual → ai.chat` (id `result`) |
+| `research` | generated: `trigger.manual → web.search → ai.chat` |
+| `workflow` | any existing scenario you pick |
+| `manual` | done by a person — the run pauses and resumes when marked done |
+
+Generated scenarios are real workflows (`🎯 Goal · 1.2 Item`), open them on the canvas from the item.
+Edited on the canvas, they are never overwritten. Every item scenario receives the goal context in
+`trigger`: `{{trigger.brief}}` (goal, characteristics, criteria), `{{trigger.task}}` (the item),
+`{{trigger.context}}` (results of dependencies or earlier items), `{{trigger.query}}`; the result
+is the `result` node's output (else the last node with output).
+
+Items run one at a time in tree order respecting `depends_on`; transient AI errors are retried once;
+progress, statuses and the activity log stream over `WS /ws/goals` (`objective_updated`).
+Without an explicit connection a goal uses the first Claude connection, then any AI connection.
+
+### Tools (Python)
+
+Tools are small Python modules with `run(input_data)` that scenarios (node **Tool**, `tool.run`),
+agents (`tool.*`) and the API call. Rail **Tools**:
+
+- **With AI** — describe the task (plus an example input / expected output): the model writes the
+  code, schemas and tests; BoardDo runs them in the sandbox and sends failures (traceback, logs,
+  mismatching values) back for repair, up to 3 rounds. Generated tests are advisory — the model may
+  drop one whose expectation is wrong; your examples are authoritative.
+- **Code** — your own module; activated only when the checks and tests pass. A new version
+  (`PUT /api/tools/{name}`) that fails keeps the previous one active.
+
+Sandbox (`crates/backend/src/tools/harness.py`): fresh temp dir per run (removed after), cleared
+environment, AST check (no eval/exec, dunder attributes, importlib, ctypes, …), an audit hook that
+enforces the tool's permissions (network, file read/write outside its directory, processes), memory
+limit (RSS watchdog; `RLIMIT_AS` on Linux) and timeout; prints go to logs, never into the result.
+It is defence in depth for a local subprocess, not a container.
+
+Interpreter: chosen in **Tools** (stored), else `BOARDDO_PYTHON`, else the newest *healthy*
+`python3.x` found — each candidate is run and must import pyexpat/ssl/sqlite3/… (e.g. a Homebrew
+build whose `pyexpat` cannot load the system libexpat is skipped: xml and pip are broken there).
+*Install packages* creates `<data dir>/tools-venv` from the chosen interpreter and installs the
+allowlisted packages (numpy, pandas, requests, beautifulsoup4) from PyPI; system Python is untouched.
+API: `GET/PUT /api/tools/runtime`, `POST /api/tools/runtime/venv`.
+
+API: `GET/POST /api/tools`, `POST /api/tools/generate`, `GET/PUT/DELETE /api/tools/{name}`,
+`POST /api/tools/{name}/run`; errors are JSON `{error, kind, details}` with 400/404/409/422.
+
+### ProjectHub extension
+
+[Project Hub](https://github.com/igornet0/ProjectShit) (projects on this machine, `.brdd` analysis,
+tasks, GitHub issues) plugs into BoardDo as an extension. It is **not installed by default**: rail
+**ProjectHub** → *Download, build and test*. BoardDo clones the repository (or uses a local checkout),
+builds `project-hub-server` into `~/.cache/boarddo/extensions/projecthub` (`PROJECTHUB_DIR`), runs its
+`--self-test`, and only then offers *Enable*. Enabled, it runs as a sidecar on a random loopback port
+with a random token (restarted if it dies) and shares the Project Hub desktop app's database unless
+another path is set.
+
+**Already installed?** BoardDo detects Project Hub on startup and in the panel: the desktop app
+(`/Applications/Project Hub.app` ships `project-hub-server` next to its executable), a
+`project-hub-server` on `PATH` / in `~/.cargo/bin`, `PROJECTHUB_BIN`, or an earlier BoardDo build.
+A detected server is adopted after its self-test (installed, not enabled) — no download or build.
+App updates are followed by version; if the binary disappears the extension shows *Binary missing*.
+*Disconnect* forgets an adopted installation without touching the app, and it is not re-adopted
+until *Use this installation* is pressed. API: `POST /api/extensions/projecthub/detect`,
+`POST /api/extensions/projecthub/use-installed` (`{"binary": "…"}` optional, must be a detected one).
+
+What appears after enabling:
+
+- **ProjectHub panel** — projects, `.brdd` (summary, changes, AI notes), git, project commands
+  (policy: off · detected · any), tasks with GitHub issues; *AI analysis* writes an engineering brief
+  into `.brdd/ai-summary.md`; *Suggest tasks* lets the agent propose work and creates the picked tasks;
+  *Create goal* starts a goal linked to the project.
+- **Nodes** `projecthub.*` — projects, project, brdd, code (tree/file/search), git, tasks, task.create,
+  task.update, command, github (sync / create issue / issues); the editor agent knows them too.
+- **Goals** linked to a project — AI items get the project's `.brdd` digest as context, and the new
+  item kind **ProjectHub task** becomes a task there (source `boarddo`, `external_ref
+  objective:<goal>/<item>`). The goal waits; a tracker polls every 15 s and completes the item when the
+  task is done in Project Hub (or its GitHub issue is closed), then resumes the goal. Ticking the item
+  off in BoardDo closes the task in Project Hub.
+
+API: `GET /api/extensions`, `POST /api/extensions/projecthub/{install,self-test,enable,disable,restart,uninstall}`,
+`PUT /api/extensions/projecthub/config`, proxy `/api/projecthub/*` → `project-hub-server /api/v1/*`,
+`POST /api/projecthub-ai/projects/{id}/{analyze,suggest-tasks}`.
+
+### AlertWim extension (log window)
+
+[AlertWim](https://github.com/igornet0/AlertWim) is a small desktop window (Tauri) that shows alerts
+and logs from scenarios. It listens on `127.0.0.1:47821` with a per-machine token and announces itself
+in `~/.alertwim/endpoint.json`; BoardDo reads that file and **creates the `AlertWim` connection
+automatically** (`type: alertwim`, base_url + token secret), refreshing it if the address changes.
+
+- **Not on the machine?** Settings → **AlertWim** → *Install from GitHub*: BoardDo clones the repository
+  and runs `cargo build --release` into `~/.cache/boarddo/extensions/alertwim` (`ALERTWIM_DIR`), then
+  starts the window. Already installed copies are detected: `ALERTWIM_BIN`, `/Applications/AlertWim.app`,
+  `~/Applications/AlertWim.app`, a BoardDo build, `alertwim` on `PATH`.
+- **Node** `alertwim.alert` — `level` (info · success · warn · error · debug), `title`, `message`,
+  `source`, `data`, `show`, `focus`. With `launch` (default) a closed AlertWim is started first, so a
+  scenario run opens the window by itself; parallel runs share one launch. A missing window does not
+  fail the scenario unless `fail_on_error` is set.
+- AlertWim runs in its own process group, so it stays open when `make dev` is stopped.
+
+API: `GET /api/extensions/alertwim`, `POST /api/extensions/alertwim/{install,detect,launch,test}`.
+Env: `ALERTWIM_HOME` (discovery dir), `ALERTWIM_BIN`, `ALERTWIM_REPO`, `ALERTWIM_BRANCH`, `ALERTWIM_DIR`.
+
+### Claude
+
+Add a connection of type `anthropic` (Settings → AI agent → Add provider → **Claude (Anthropic)**,
+or Connections). It speaks the native Messages API (`x-api-key`, `anthropic-version: 2023-06-01`)
+and plugs into every chat surface: `ai.*` nodes, the editor agent, the campaign planner and goals.
+
+```bash
+POST /api/connections
+{
+  "name": "Claude",
+  "type": "anthropic",
+  "config": { "provider": "anthropic", "base_url": "https://api.anthropic.com/v1", "default_model": "claude-opus-5-5" },
+  "secret": { "api_key": "sk-ant-…" }
+}
+```
+
+Models: `claude-opus-5-5` (default), `claude-sonnet-5-5`, `claude-haiku-4-5`, `claude-fable-5-1`.
+Sampling params are only sent to models that accept them, short calls run at low effort, thinking
+models get a token floor, and `fallbacks: "default"` is enabled for Opus 5.x / Sonnet 5.5 / Fable on
+the Anthropic API. A safety decline (`stop_reason: "refusal"`) surfaces as an error. Claude
+connections are text-only: `ai.image` / `ai.audio` / `ai.video` need an OpenAI-compatible one.
+
 ### Connections / Secrets
 
 Secrets never enter workflow JSON or API responses:
@@ -249,6 +386,11 @@ Response only has `id`, `name`, `type`, `config`, `has_secret`, `enabled`.
 - `GET /api/goal-runs`, `/api/goal-runs/:id/{activity,experiments,memory}`
 - `GET /api/approvals`, `POST /api/approvals/:id/approve|reject`
 - `GET /api/agent-templates`
+- `GET/POST /api/objectives`, `GET/PUT/DELETE /api/objectives/:id`
+- `POST /api/objectives/:id/assist` (`mode`: `fill` | `decompose` + `item_id` | `refine`; `apply`)
+- `POST /api/objectives/:id/run` (`retry_failed`, `reset`, `item_id`), `POST /api/objectives/:id/stop`
+- `PATCH /api/objectives/:id/items/:item_id` (`status`, `result`, `workflow_id`, `unlink_workflow`)
+- `POST /api/objectives/:id/items/:item_id/scenario` — create/refresh the item scenario without running
 - `WS /ws/goals` — GoalRun live events
 - `GET/POST /api/channels`
 - `GET/PUT/DELETE /api/channels/:id`

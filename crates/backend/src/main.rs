@@ -1,5 +1,6 @@
 //! SmartDo — BoardDo workflow execution engine.
 
+mod alertwim;
 mod api;
 mod agent_runtime;
 mod content;
@@ -7,6 +8,8 @@ mod connections;
 mod engine;
 mod ingress;
 mod integrations;
+mod objectives;
+mod projecthub;
 mod runtime;
 mod scheduler;
 mod secrets;
@@ -75,6 +78,11 @@ async fn main() -> anyhow::Result<()> {
     ));
     scheduler::spawn_arc(state.clone());
     crate::agent_runtime::spawn_arc(state.clone());
+    crate::objectives::recover(&state).await;
+    crate::tools::runtime::init(&state.storage, &state.data_dir).await;
+    crate::projecthub::init(state.storage.clone()).await;
+    crate::projecthub::tracker::spawn(state.clone());
+    crate::alertwim::init(state.clone()).await;
     telegram_automation::spawn(state.clone());
     if let Err(err) = state.runtime.restore(&state).await {
         tracing::error!(error = %err, "runtime.restore_failed");

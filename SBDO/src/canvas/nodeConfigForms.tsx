@@ -4,6 +4,8 @@ import type { Connection } from '../types'
 import { usePreferences } from '../settings/PreferencesContext'
 import type { MessageKey } from '../i18n/messages'
 import { ExpressionField } from '../ui/ExpressionField'
+import { ph, type PhProject } from '../api/projecthub'
+import { getTool, listTools, type ToolSummary } from '../api/tools'
 
 type Config = Record<string, unknown>
 
@@ -72,7 +74,8 @@ function ConnectionField({
   const filtered = connections.filter(
     (c) =>
       c.enabled &&
-      (c.type === type || (type === 'openai' && c.type === 'ai')),
+      (c.type === type ||
+        (type === 'openai' && (c.type === 'ai' || c.type === 'anthropic' || c.type === 'claude'))),
   )
 
   return (
@@ -852,6 +855,130 @@ function LogForm({ config, onChange }: FormProps) {
   )
 }
 
+const ALERT_LEVELS = ['info', 'success', 'warn', 'error', 'debug'] as const
+
+function AlertWimForm({ config, onChange }: FormProps) {
+  const { t } = usePreferences()
+  const flag = (key: string, fallback: boolean) => (typeof config[key] === 'boolean' ? (config[key] as boolean) : fallback)
+  return (
+    <>
+      <InfoBlock>{t('editor.alertwim.info')}</InfoBlock>
+      <Field label={t('editor.alertwim.level')}>
+        <select value={asString(config.level, 'info')} onChange={(e) => onChange({ ...config, level: e.target.value })}>
+          {ALERT_LEVELS.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label={t('editor.alertwim.title')} hint={t('editor.exprHint')}>
+        <ExpressionField value={asString(config.title)} onChange={(title) => onChange({ ...config, title })} placeholder="RiskManager" />
+      </Field>
+      <Field label={t('editor.log.message')} hint={t('editor.exprHint')}>
+        <ExpressionField
+          multiline
+          rows={4}
+          value={asString(config.message)}
+          onChange={(message) => onChange({ ...config, message })}
+          placeholder="{{nodes.step.output.summary}}"
+        />
+      </Field>
+      <Field label={t('editor.alertwim.source')}>
+        <ExpressionField value={asString(config.source)} onChange={(source) => onChange({ ...config, source })} placeholder="BoardDo" />
+      </Field>
+      <label className="editor__check">
+        <input type="checkbox" checked={flag('launch', true)} onChange={(e) => onChange({ ...config, launch: e.target.checked })} />
+        <span>{t('editor.alertwim.launch')}</span>
+      </label>
+      <label className="editor__check">
+        <input type="checkbox" checked={flag('show', true)} onChange={(e) => onChange({ ...config, show: e.target.checked })} />
+        <span>{t('editor.alertwim.show')}</span>
+      </label>
+      <label className="editor__check">
+        <input type="checkbox" checked={flag('focus', false)} onChange={(e) => onChange({ ...config, focus: e.target.checked })} />
+        <span>{t('editor.alertwim.focus')}</span>
+      </label>
+    </>
+  )
+}
+
+function ToolRunForm({ config, onChange }: FormProps) {
+  const { t } = usePreferences()
+  const [tools, setTools] = useState<ToolSummary[]>([])
+  const name = asString(config.tool_name ?? config.name)
+  const [text, setText] = useState(() => JSON.stringify(asObject(config.input), null, 2))
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    listTools()
+      .then((r) => setTools(r.tools))
+      .catch(() => setTools([]))
+  }, [])
+
+  const selected = tools.find((x) => x.name === name)
+
+  function setInput(raw: string) {
+    setText(raw)
+    try {
+      const parsed = raw.trim() ? (JSON.parse(raw) as unknown) : {}
+      onChange({ ...config, input: parsed })
+      setError(null)
+    } catch {
+      setError(t('editor.invalidJson'))
+    }
+  }
+
+  async function insertExample() {
+    if (!name) return
+    try {
+      const d = await getTool(name)
+      const active = d.versions.find((v) => v.id === d.tool.active_version_id) ?? d.versions[0]
+      const example = active?.test_cases[0]?.input
+      if (example !== undefined) setInput(JSON.stringify(example, null, 2))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <>
+      <Field label={t('editor.tool.name')}>
+        <select value={name} onChange={(e) => onChange({ ...config, tool_name: e.target.value })}>
+          <option value="">{t('editor.tool.pick')}</option>
+          {name && !selected && <option value={name}>{name}</option>}
+          {tools.map((x) => (
+            <option key={x.id} value={x.name}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {selected?.description && <InfoBlock>{selected.description}</InfoBlock>}
+      <Field label={t('editor.tool.input')} hint={error ?? t('editor.tool.inputHint')}>
+        <textarea rows={8} value={text} spellCheck={false} className="mono" onChange={(e) => setInput(e.target.value)} />
+      </Field>
+      <div className="form__actions">
+        <button type="button" className="btn btn--sm" disabled={!name} onClick={() => void insertExample()}>
+          {t('editor.tool.example')}
+        </button>
+      </div>
+      <label className="switch">
+        <input
+          type="checkbox"
+          checked={config.fail_on_error !== false}
+          onChange={(e) => onChange({ ...config, fail_on_error: e.target.checked })}
+        />
+        <span className="switch__track">
+          <span className="switch__thumb" />
+        </span>
+        <span className="switch__label">{t('editor.tool.failOnError')}</span>
+      </label>
+      <InfoBlock>{t('editor.tool.outputHint')}</InfoBlock>
+    </>
+  )
+}
+
 function TelegramUserAccountField({
   config,
   onChange,
@@ -1150,6 +1277,17 @@ function TelegramUserTriggerForm({ config, onChange }: FormProps) {
         {t('editor.telegramUser.ignoreOutgoing')}
       </label>
       <p className="editor__hint">{t('editor.telegramUser.ignoreOutgoingHint')}</p>
+      <label className="editor__check">
+        <input
+          type="checkbox"
+          checked={config.process_backlog === true}
+          onChange={(e) =>
+            onChange({ ...config, process_backlog: e.target.checked })
+          }
+        />
+        {t('editor.telegramUser.processBacklog')}
+      </label>
+      <p className="editor__hint">{t('editor.telegramUser.processBacklogHint')}</p>
     </>
   )
 }
@@ -1447,6 +1585,21 @@ export function NodeConfigForm({
       return <TelegramUserMembersForm {...props} />
     case TYPE_IDS.DEBUG_LOG:
       return <LogForm {...props} />
+    case TYPE_IDS.TOOL_RUN:
+      return <ToolRunForm {...props} />
+    case TYPE_IDS.ALERTWIM_ALERT:
+      return <AlertWimForm {...props} />
+    case TYPE_IDS.PH_PROJECTS:
+    case TYPE_IDS.PH_PROJECT:
+    case TYPE_IDS.PH_BRDD:
+    case TYPE_IDS.PH_CODE:
+    case TYPE_IDS.PH_GIT:
+    case TYPE_IDS.PH_TASKS:
+    case TYPE_IDS.PH_TASK_CREATE:
+    case TYPE_IDS.PH_TASK_UPDATE:
+    case TYPE_IDS.PH_COMMAND:
+    case TYPE_IDS.PH_GITHUB:
+      return <ProjectHubForm typeId={typeId} {...props} />
     default:
       return <FallbackForm {...props} />
   }
@@ -2131,6 +2284,240 @@ function GitHubLatestReleaseForm({ config, onChange, connections }: FormProps) {
           <option value="false">{t('editor.github.trackNewNo')}</option>
         </select>
       </Field>
+    </>
+  )
+}
+
+// ─── ProjectHub nodes ─────────────────────────────────────────────────────────
+
+let phProjectsCache: Promise<PhProject[]> | null = null
+
+function usePhProjects(): PhProject[] {
+  const [items, setItems] = useState<PhProject[]>([])
+  useEffect(() => {
+    phProjectsCache ??= ph
+      .projects({ limit: 1000 })
+      .then((r) => r.items)
+      .catch(() => {
+        phProjectsCache = null
+        return []
+      })
+    void phProjectsCache.then(setItems)
+  }, [])
+  return items
+}
+
+function PhProjectField({ config, onChange, optional }: FormProps & { optional?: boolean }) {
+  const { t } = usePreferences()
+  const projects = usePhProjects()
+  const value = asString(config.project)
+  const known = projects.some((p) => p.id === value || p.name === value)
+  const custom = value !== '' && !known
+  return (
+    <Field label={t('editor.ph.project')} hint={t(optional ? 'editor.ph.projectOptionalHint' : 'editor.ph.projectHint')}>
+      {projects.length > 0 && !custom ? (
+        <select value={value} onChange={(e) => onChange({ ...config, project: e.target.value })}>
+          <option value="">{optional ? t('editor.ph.anyProject') : t('editor.ph.pickProject')}</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} — {p.root_path}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <ExpressionField
+          value={value}
+          onChange={(v) => onChange({ ...config, project: v })}
+          placeholder="{{trigger.project}}"
+        />
+      )}
+    </Field>
+  )
+}
+
+function PhText({
+  config,
+  onChange,
+  name,
+  label,
+  hint,
+  placeholder,
+  multiline,
+}: FormProps & { name: string; label: string; hint?: string; placeholder?: string; multiline?: boolean }) {
+  return (
+    <Field label={label} hint={hint}>
+      <ExpressionField
+        value={asString(config[name])}
+        onChange={(v) => onChange({ ...config, [name]: v })}
+        placeholder={placeholder}
+        multiline={multiline}
+        rows={multiline ? 4 : undefined}
+      />
+    </Field>
+  )
+}
+
+function PhSelect({
+  config,
+  onChange,
+  name,
+  label,
+  options,
+}: FormProps & { name: string; label: string; options: [string, string][] }) {
+  return (
+    <Field label={label}>
+      <select value={asString(config[name], options[0]?.[0])} onChange={(e) => onChange({ ...config, [name]: e.target.value })}>
+        {options.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
+    </Field>
+  )
+}
+
+function PhCheck({ config, onChange, name, label }: FormProps & { name: string; label: string }) {
+  return (
+    <label className="editor__check">
+      <input type="checkbox" checked={config[name] === true} onChange={(e) => onChange({ ...config, [name]: e.target.checked })} />
+      <span>{label}</span>
+    </label>
+  )
+}
+
+function ProjectHubForm({ typeId, ...props }: FormProps & { typeId: string }) {
+  const { t } = usePreferences()
+  const { config } = props
+  const action = asString(config.action)
+  const statusOptions: [string, string][] = [
+    ['todo', t('editor.ph.status.todo')],
+    ['in_progress', t('editor.ph.status.in_progress')],
+    ['done', t('editor.ph.status.done')],
+    ['cancelled', t('editor.ph.status.cancelled')],
+  ]
+  return (
+    <>
+      <InfoBlock>{t(`editor.ph.help.${typeId.replace('projecthub.', '').replace('.', '_')}` as MessageKey)}</InfoBlock>
+      {typeId === TYPE_IDS.PH_PROJECTS && (
+        <>
+          <PhText {...props} name="query" label={t('editor.ph.query')} placeholder="api" />
+          <PhText {...props} name="limit" label={t('editor.ph.limit')} placeholder="50" />
+        </>
+      )}
+      {([TYPE_IDS.PH_PROJECT, TYPE_IDS.PH_GIT, TYPE_IDS.PH_COMMAND] as string[]).includes(typeId) && <PhProjectField {...props} />}
+      {typeId === TYPE_IDS.PH_GIT && <PhText {...props} name="limit" label={t('editor.ph.commits')} placeholder="20" />}
+      {typeId === TYPE_IDS.PH_BRDD && (
+        <>
+          <PhProjectField {...props} />
+          <PhSelect
+            {...props}
+            name="action"
+            label={t('editor.ph.action')}
+            options={[
+              ['read', t('editor.ph.brdd.read')],
+              ['refresh', t('editor.ph.brdd.refresh')],
+              ['notes', t('editor.ph.brdd.notes')],
+            ]}
+          />
+          {action === 'refresh' && <PhCheck {...props} name="force_snapshot" label={t('editor.ph.forceSnapshot')} />}
+          {action === 'notes' && <PhText {...props} name="notes" label={t('editor.ph.notes')} multiline placeholder="{{nodes.ai.output.text}}" />}
+        </>
+      )}
+      {typeId === TYPE_IDS.PH_CODE && (
+        <>
+          <PhProjectField {...props} />
+          <PhSelect
+            {...props}
+            name="action"
+            label={t('editor.ph.action')}
+            options={[
+              ['tree', t('editor.ph.code.tree')],
+              ['file', t('editor.ph.code.file')],
+              ['search', t('editor.ph.code.search')],
+            ]}
+          />
+          {action !== 'search' && <PhText {...props} name="path" label={t('editor.ph.path')} placeholder={action === 'file' ? 'src/main.rs' : 'src'} />}
+          {(action === 'tree' || action === '') && <PhText {...props} name="depth" label={t('editor.ph.depth')} placeholder="2" />}
+          {action === 'search' && <PhText {...props} name="query" label={t('editor.ph.query')} placeholder="TODO" />}
+        </>
+      )}
+      {typeId === TYPE_IDS.PH_TASKS && (
+        <>
+          <PhProjectField {...props} optional />
+          <PhText {...props} name="status" label={t('editor.ph.statusFilter')} placeholder="todo,in_progress" />
+          <PhText {...props} name="source" label={t('editor.ph.source')} placeholder="boarddo" />
+        </>
+      )}
+      {typeId === TYPE_IDS.PH_TASK_CREATE && (
+        <>
+          <PhProjectField {...props} optional />
+          <PhText {...props} name="title" label={t('editor.ph.title')} placeholder="{{trigger.text}}" />
+          <PhText {...props} name="description" label={t('editor.ph.description')} multiline />
+          <PhSelect
+            {...props}
+            name="priority"
+            label={t('editor.ph.priority')}
+            options={[
+              ['medium', t('editor.ph.priority.medium')],
+              ['low', t('editor.ph.priority.low')],
+              ['high', t('editor.ph.priority.high')],
+              ['critical', t('editor.ph.priority.critical')],
+            ]}
+          />
+          <PhText {...props} name="due_at" label={t('editor.ph.dueAt')} placeholder="2026-12-31T18:00:00Z" />
+          <PhCheck {...props} name="github_issue" label={t('editor.ph.githubIssue')} />
+        </>
+      )}
+      {typeId === TYPE_IDS.PH_TASK_UPDATE && (
+        <>
+          <PhText {...props} name="task_id" label={t('editor.ph.taskId')} placeholder="{{nodes.create.output.id}}" />
+          <PhSelect {...props} name="status" label={t('editor.ph.status')} options={statusOptions} />
+          <PhText {...props} name="title" label={t('editor.ph.title')} />
+        </>
+      )}
+      {typeId === TYPE_IDS.PH_COMMAND && (
+        <>
+          <PhText {...props} name="command" label={t('editor.ph.command')} hint={t('editor.ph.commandHint')} placeholder="cargo test" />
+          <PhText {...props} name="timeout_secs" label={t('editor.ph.timeout')} placeholder="300" />
+          <PhCheck {...props} name="fail_on_error" label={t('editor.ph.failOnError')} />
+        </>
+      )}
+      {typeId === TYPE_IDS.PH_GITHUB && (
+        <>
+          <PhSelect
+            {...props}
+            name="action"
+            label={t('editor.ph.action')}
+            options={[
+              ['sync', t('editor.ph.github.sync')],
+              ['create_issue', t('editor.ph.github.createIssue')],
+              ['issues', t('editor.ph.github.issues')],
+            ]}
+          />
+          {action === 'create_issue' && (
+            <>
+              <PhText {...props} name="task_id" label={t('editor.ph.taskId')} placeholder="{{nodes.create.output.id}}" />
+              <PhText {...props} name="labels" label={t('editor.ph.labels')} placeholder="bug,boarddo" />
+            </>
+          )}
+          {action === 'issues' && (
+            <>
+              <PhProjectField {...props} />
+              <PhSelect
+                {...props}
+                name="state"
+                label={t('editor.ph.issueState')}
+                options={[
+                  ['open', 'open'],
+                  ['closed', 'closed'],
+                  ['all', 'all'],
+                ]}
+              />
+            </>
+          )}
+        </>
+      )}
     </>
   )
 }

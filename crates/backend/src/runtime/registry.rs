@@ -112,6 +112,11 @@ impl RuntimeSupervisor {
             .is_some_and(ScenarioRuntime::is_accepting)
     }
 
+    /// When the runtime was started (kept across reloads); `None` if not armed.
+    pub fn started_at(&self, workflow_id: Uuid) -> Option<DateTime<Utc>> {
+        self.inner.read().get(&workflow_id).map(|rt| rt.started_at)
+    }
+
     /// Which Telegram accounts armed runtimes currently need online.
     pub fn telegram_account_demand(&self) -> TelegramAccountDemand {
         let mut specific = HashSet::new();

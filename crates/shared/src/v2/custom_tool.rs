@@ -176,6 +176,12 @@ pub struct ToolTestCase {
     pub input: Value,
     #[serde(default)]
     pub expected_schema: Value,
+    /// Expected output: every field given here must match (objects compare as subsets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected: Option<Value>,
+    /// `user` (authoritative) | `ai` (generated; may be dropped when its expectation is wrong).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -184,6 +190,9 @@ pub struct ToolRepairRecord {
     pub error_message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub traceback: Option<String>,
+    /// `auto` (deterministic fix) | `ai`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_by: Option<String>,
     pub at: DateTime<Utc>,
 }
 
@@ -268,6 +277,12 @@ pub struct CreateToolRequest {
     pub permissions: ToolPermissions,
     #[serde(default)]
     pub test_input: Option<Value>,
+    /// Extra test cases (input + expected output) run before activation.
+    #[serde(default)]
+    pub tests: Vec<ToolTestCase>,
+    /// Timeout / memory overrides (clamped by the server).
+    #[serde(default)]
+    pub runtime: Option<ToolRuntimeConfig>,
     #[serde(default)]
     pub purpose: String,
     #[serde(default)]
@@ -283,6 +298,8 @@ pub fn custom_tool_capability(type_id: &str) -> Option<&'static str> {
     match type_id {
         "tool.create"
         | "create_tool"
+        | "tool.generate"
+        | "generate_tool"
         | "tool.update"
         | "update_tool"
         | "tool.test"

@@ -103,6 +103,12 @@ impl NodeRegistry {
         registry.register(Arc::new(TelegramUserEditMessage));
         registry.register(Arc::new(TelegramUserGetChatMembers));
         registry.register(Arc::new(TelegramUserDeleteMessages));
+        // ProjectHub extension nodes: always known to the graph (so saved
+        // scenarios validate); they report a clear error until it is enabled.
+        for type_id in crate::engine::nodes::projecthub::ALL {
+            registry.register(Arc::new(crate::engine::nodes::ProjectHubNode(type_id)));
+        }
+        registry.register(Arc::new(crate::engine::nodes::AlertWimAlertNode));
         registry
     }
 }
