@@ -93,7 +93,7 @@ async fn assist_objective(
     Json(req): Json<ObjectiveAssistRequest>,
 ) -> ApiResult<ObjectiveAssistResponse> {
     let current = load(&state, id).await?;
-    let model = llm::resolve(&state, &current).await.map_err(bad)?;
+    let model = llm::resolve_for(&state, &current, boarddo_shared::v2::TaskKind::Planning).await.map_err(bad)?;
     let project = runner::project_context(&current).await;
     let draft = assist::draft(&model, &current, &req, project.as_deref())
         .await

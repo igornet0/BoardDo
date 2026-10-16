@@ -54,6 +54,11 @@ pub struct FindQuery {
     pub limit: Option<u32>,
 }
 
+/// Unified tool registry: every tool id with its contract.
+pub async fn catalog() -> Json<Vec<boarddo_shared::v2::ToolDescriptor>> {
+    Json(boarddo_shared::v2::all_tools().to_vec())
+}
+
 pub async fn list(State(state): State<SharedState>) -> ApiResult {
     let svc = ToolService::new(state.storage.clone());
     Ok(Json(json!({ "tools": svc.list().await? })))

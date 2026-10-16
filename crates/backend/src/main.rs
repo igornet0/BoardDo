@@ -11,6 +11,7 @@ mod integrations;
 mod ledger;
 mod objectives;
 mod projecthub;
+mod routing;
 mod runtime;
 mod scheduler;
 mod secrets;
@@ -54,6 +55,12 @@ async fn main() -> anyhow::Result<()> {
 
     let storage = Storage::connect(&database_url).await?;
     storage.migrate().await?;
+    // Calls left `started` by a previous process were interrupted mid-call:
+    // their outcome is unknown, so they stay non-repeatable until resolved.
+    let interrupted = storage.tool_journal_expire_stale(chrono::Utc::now()).await?;
+    if interrupted > 0 {
+        tracing::warn!(interrupted, "tool calls interrupted by restart need manual resolution (/api/tool-journal)");
+    }
     ledger::init(storage.clone());
 
     let secrets_store = Arc::new(EncryptedSqliteSecretStore::from_env(

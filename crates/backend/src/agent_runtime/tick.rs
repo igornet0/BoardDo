@@ -2,7 +2,7 @@
 
 use boarddo_shared::v2::{
     AgentApproval, AgentAuditEntry, Experiment, ExperimentDecision, GoalRun, GoalRunStatus,
-    GoalRuntimeEvent, GoalSpec, PlannedToolCall, capability_for_tool, tool_counts_as_action,
+    GoalRuntimeEvent, GoalSpec, PlannedToolCall, parse_needs_approval, tool_counts_as_action,
 };
 use boarddo_shared::v2::ApprovalDecision;
 use chrono::{Duration, Utc};
@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::policy::{PolicyDecision, check_tool};
-use super::tools::{ToolGateway, today};
+use super::tools::{ToolGateway, pin_approval_config, today};
 use crate::state::SharedState;
 
 pub async fn run_tick(state: &SharedState, spec: GoalSpec, mut run: GoalRun) -> anyhow::Result<()> {
@@ -39,6 +39,28 @@ pub async fn run_tick(state: &SharedState, spec: GoalSpec, mut run: GoalRun) -> 
             status: run.status,
         });
         return Ok(());
+    }
+
+    match crate::ledger::headroom().await {
+        Ok(()) => {}
+        Err(crate::ledger::Exhausted::Daily { reason, resume_at }) => {
+            run.next_tick_at = Some(resume_at);
+            run.error = Some(reason.clone());
+            state.storage.update_goal_run(&run).await?;
+            audit(state, run.id, "budget.daily_exhausted", Some(&reason), None).await?;
+            return Ok(());
+        }
+        Err(crate::ledger::Exhausted::Total(reason)) => {
+            run.status = GoalRunStatus::Paused;
+            run.error = Some(reason.clone());
+            state.storage.update_goal_run(&run).await?;
+            state.emit_goal(GoalRuntimeEvent::StatusChanged {
+                run_id: run.id,
+                status: run.status,
+            });
+            audit(state, run.id, "budget.exhausted", Some(&reason), None).await?;
+            return Ok(());
+        }
     }
 
     let pending = state.storage.count_pending_approvals(run.id).await?;
@@ -196,6 +218,21 @@ pub async fn run_tick(state: &SharedState, spec: GoalSpec, mut run: GoalRun) -> 
                         )
                         .await?;
                     }
+                    Err(err) if parse_needs_approval(&err).is_some() => {
+                        // A workflow node needs a human: nothing ran, so the
+                        // action is not counted and the run waits.
+                        let capability = parse_needs_approval(&err).unwrap_or_default();
+                        audit(
+                            state,
+                            run.id,
+                            "act.needs_approval",
+                            Some(&err),
+                            Some(json!({ "type_id": call.type_id })),
+                        )
+                        .await?;
+                        queue_approval(state, &spec, &run, call, &capability).await?;
+                        run.status = GoalRunStatus::WaitingApproval;
+                    }
                     Err(err) => {
                         if tool_counts_as_action(&call.type_id) {
                             run.actions_today += 1;
@@ -225,11 +262,13 @@ pub async fn run_tick(state: &SharedState, spec: GoalSpec, mut run: GoalRun) -> 
 
     apply_execution_metric(state, &spec, &mut run).await?;
 
-    if run.current >= spec.target {
-        run.status = GoalRunStatus::Succeeded;
-        run.finished_at = Some(Utc::now());
-    } else if run.status == GoalRunStatus::Running {
-        run.status = GoalRunStatus::Running;
+    if run.status == GoalRunStatus::Running {
+        // Persist the counter first so the verified check sees this run.
+        state.storage.update_goal_run(&run).await?;
+        if state.storage.goal_target_verified(spec.id).await? {
+            run.status = GoalRunStatus::Succeeded;
+            run.finished_at = Some(Utc::now());
+        }
     }
 
     run.tick_count += 1;
@@ -271,7 +310,10 @@ async fn queue_approval(
         description: Some(format!("Capability `{capability}` requires approval.")),
         capability: capability.into(),
         tool_type_id: call.type_id.clone(),
-        payload: json!({ "config": call.config, "id": call.id }),
+        payload: json!({
+            "config": pin_approval_config(state, &call.config).await,
+            "id": call.id,
+        }),
         status: ApprovalDecision::Pending,
         created_at: Utc::now(),
         resolved_at: None,
@@ -290,7 +332,6 @@ async fn queue_approval(
         Some(json!({ "approval_id": approval.id, "capability": capability })),
     )
     .await?;
-    let _ = capability_for_tool(&call.type_id);
     Ok(())
 }
 
@@ -300,7 +341,15 @@ pub async fn execute_approved_tool(
     run: &GoalRun,
     call: &PlannedToolCall,
 ) -> Result<Value, String> {
-    ToolGateway::new().execute(state, spec, run, call).await
+    // Re-check at execution time: the approval does not outrank a kill
+    // switch, deadline, daily cap or a policy change made since it was queued.
+    match check_tool(spec, run, call) {
+        PolicyDecision::Deny(reason) => return Err(format!("policy: {reason}")),
+        PolicyDecision::NeedsApproval { .. } | PolicyDecision::Allow => {}
+    }
+    ToolGateway::new()
+        .execute_with_approval(state, spec, run, call, true)
+        .await
 }
 
 async fn audit(
@@ -378,7 +427,11 @@ async fn apply_execution_metric(
             .storage
             .list_executions_for_workflow(wf_id, 20)
             .await?;
-        if execs.iter().any(|e| e.status == boarddo_shared::ExecutionStatus::Completed) {
+        // A degraded run (a node reported failure and the run went on) is not a success.
+        if execs
+            .iter()
+            .any(|e| e.status == boarddo_shared::ExecutionStatus::Completed && e.error.is_none())
+        {
             scored += 1.0;
         }
     }

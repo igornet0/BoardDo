@@ -12,13 +12,17 @@ use uuid::Uuid;
 use crate::triggers::schedule::{next_run_after, schedules_from_definition};
 
 pub(crate) mod content;
+mod analytics;
 mod custom_tools;
 mod goals;
 mod ledger;
 mod marketing;
 mod objectives;
 mod sales;
+mod tool_journal;
+pub use ledger::GoalSpend;
 pub use sales::DealFilter;
+pub use tool_journal::{JournalClaim, JournalEntry, JournalResolution};
 
 #[derive(Clone)]
 pub struct Storage {
@@ -341,6 +345,8 @@ impl Storage {
         self.migrate_objectives().await?;
         self.migrate_sales().await?;
         self.migrate_ledger().await?;
+        self.migrate_external_spend().await?;
+        self.migrate_tool_journal().await?;
 
         Ok(())
     }

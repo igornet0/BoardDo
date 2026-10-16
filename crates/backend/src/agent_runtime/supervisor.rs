@@ -36,7 +36,16 @@ async fn tick_due(state: &SharedState) -> anyhow::Result<()> {
             goal_run_id: Some(run.id),
             ..Default::default()
         };
-        if let Err(err) = crate::ledger::scoped(scope, super::tick::run_tick(state, spec, run)).await {
+        let limits = crate::ledger::BudgetLimit::for_goal(
+            spec.id,
+            &spec.title,
+            spec.policy.budget_usd,
+            spec.policy.max_daily_spend_usd,
+        )
+        .into_iter()
+        .collect();
+        let tick = crate::ledger::budgeted(limits, super::tick::run_tick(state, spec, run));
+        if let Err(err) = crate::ledger::scoped(scope, tick).await {
             error!(error = %err, "goal tick failed");
         }
     }

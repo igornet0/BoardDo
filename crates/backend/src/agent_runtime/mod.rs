@@ -6,6 +6,7 @@ mod policy;
 mod supervisor;
 mod tick;
 mod tools;
+pub(crate) mod execution;
 
 pub use supervisor::spawn_arc;
 pub use tick::execute_approved_tool;
@@ -126,16 +127,8 @@ pub fn policy_for_autonomy(
             }
         }
         3 => {
-            policy.require_approval.retain(|c| {
-                c != boarddo_shared::v2::caps::TELEGRAM_WRITE
-                    && c != "telegram.write"
-                    && c != "publisher.telegram.send"
-            });
-            for cap in AutonomyLevel::full_autonomous_require_approval() {
-                if !policy.require_approval.contains(&cap) {
-                    policy.require_approval.push(cap);
-                }
-            }
+            policy.require_approval =
+                boarddo_shared::v2::effective_require_approval(&policy.require_approval, level);
             if policy.max_daily_spend_usd <= 0.0 && policy.budget_usd > 0.0 {
                 policy.max_daily_spend_usd = (policy.budget_usd / 15.0).max(1.0);
             }
@@ -230,6 +223,7 @@ pub async fn create_campaign(
             allowed_domains: vec![],
             blocked_domains: vec![],
             kill_switch: false,
+            replan: Default::default(),
         },
         agent_type_id: "agent.marketing".into(),
         instructions: String::new(),
@@ -260,6 +254,7 @@ pub async fn create_campaign(
         error: None,
         started_at: now,
         finished_at: None,
+        replan: Default::default(),
     };
     state.storage.insert_goal_run(&run).await?;
 
@@ -381,6 +376,7 @@ pub async fn start_run(
         error: None,
         started_at: now,
         finished_at: None,
+        replan: Default::default(),
     };
     state.storage.insert_goal_run(&run).await?;
     state.emit_goal(GoalRuntimeEvent::StatusChanged {
@@ -418,16 +414,23 @@ pub async fn record_lead(state: &SharedState, spec: &GoalSpec, delta: f64) -> an
         .latest_run_for_goal(spec.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("no active run"))?;
+    // `current` is the agent's own counter; completion is decided on
+    // verified data only.
     run.current += delta;
-    if run.current >= spec.target {
-        run.status = GoalRunStatus::Succeeded;
-        run.finished_at = Some(Utc::now());
-    }
     state.storage.update_goal_run(&run).await?;
     state.emit_goal(GoalRuntimeEvent::LeadRecorded {
         run_id: run.id,
         current: run.current,
     });
+    if run.status == GoalRunStatus::Running && state.storage.goal_target_verified(spec.id).await? {
+        run.status = GoalRunStatus::Succeeded;
+        run.finished_at = Some(Utc::now());
+        state.storage.update_goal_run(&run).await?;
+        state.emit_goal(GoalRuntimeEvent::StatusChanged {
+            run_id: run.id,
+            status: run.status,
+        });
+    }
     Ok(run)
 }
 

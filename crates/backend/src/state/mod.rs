@@ -51,7 +51,8 @@ impl AppState {
             .with_telegram_user(gateway)
             .with_node_state(node_state)
             .with_custom_tools(custom_tools.clone())
-            .with_media(media.clone());
+            .with_media(media.clone())
+            .with_journal(Arc::new(storage.clone()));
         let ingress = Arc::new(IngressService::new(storage.clone()));
         Self {
             storage,

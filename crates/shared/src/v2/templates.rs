@@ -70,6 +70,7 @@ Telegram outreach requires approval. Record what worked and pivot away from weak
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             kill_switch: false,
+            replan: Default::default(),
         },
         strategy: super::goal_runtime::default_growth_strategy(),
     }
@@ -122,6 +123,7 @@ note contradictions, and keep a durable research memory. Do not send messages."
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             kill_switch: false,
+            replan: Default::default(),
         },
         strategy: {
             let mut m = serde_json::Map::new();
@@ -178,6 +180,7 @@ Only record a change when something actually moved. Summarize impact."
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             kill_switch: false,
+            replan: Default::default(),
         },
         strategy: {
             let mut m = serde_json::Map::new();
@@ -254,6 +257,7 @@ Prefer specializing an existing seed graph over inventing a huge canvas."
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             kill_switch: false,
+            replan: Default::default(),
         },
         strategy: {
             let mut m = serde_json::Map::new();
@@ -362,6 +366,7 @@ Never spend money. Never spam. Level-2 autonomy requires approval before Telegra
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             kill_switch: false,
+            replan: Default::default(),
         },
         strategy: super::marketing::default_marketing_strategy(),
     }
@@ -411,6 +416,7 @@ Always test_tool before relying on run_tool in scenarios.".into(),
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             kill_switch: false,
+            replan: Default::default(),
         },
         strategy: {
             let mut m = serde_json::Map::new();

@@ -1,8 +1,8 @@
 //! Policy gate for Goal agent tool calls.
 
 use boarddo_shared::v2::{
-    GoalRun, GoalSpec, PlannedToolCall, autonomy_from_constraints, capability_for_tool,
-    resolve_tool_alias, tool_counts_as_action,
+    GoalRun, GoalSpec, PlannedToolCall, RiskDecision, RiskRequest, autonomy_from_constraints,
+    evaluate, lookup_tool, resolve_tool_alias, tool_counts_as_action,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,85 +27,65 @@ pub fn check_tool(spec: &GoalSpec, run: &GoalRun, call: &PlannedToolCall) -> Pol
 
     let canonical = resolve_tool_alias(&call.type_id).to_string();
 
-    if let Some(reason) = super::marketing::apply_autonomy_policy(spec, &canonical) {
-        return PolicyDecision::Deny(reason);
-    }
-
     let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let used = if run.actions_day == day {
         run.actions_today
     } else {
         0
     };
-    if tool_counts_as_action(&canonical) && used >= spec.policy.max_actions_per_day {
+    if lookup_tool(&canonical).is_some_and(|d| d.available)
+        && tool_counts_as_action(&canonical)
+        && used >= spec.policy.max_actions_per_day
+    {
         return PolicyDecision::Deny(format!(
             "daily action cap reached ({})",
             spec.policy.max_actions_per_day
         ));
     }
 
-    let cap = capability_for_tool(&canonical);
-    if !spec.budget.allows(cap) {
-        return PolicyDecision::Deny(format!("capability `{cap}` not allowed"));
-    }
+    evaluate_for_goal(spec, &call.type_id, false).into()
+}
 
-    if !spec.tools.is_empty()
-        && !spec.tools.iter().any(|t| {
-            t.type_id == call.type_id
-                || t.type_id == canonical
-                || resolve_tool_alias(&t.type_id) == canonical
-        })
-    {
-        return PolicyDecision::Deny(format!("tool `{}` is not in the goal allowlist", call.type_id));
-    }
+/// Goal-scoped risk check for one tool id (no run/kill/deadline gates).
+pub fn evaluate_for_goal(spec: &GoalSpec, type_id: &str, approved: bool) -> RiskDecision {
+    let allowlist: Vec<String> = spec.tools.iter().map(|t| t.type_id.clone()).collect();
+    evaluate_goal_request(spec, type_id, Some(&allowlist), approved)
+}
 
-    let level = autonomy_from_constraints(&spec.constraints);
+/// Risk check for a node inside a goal's workflow. The goal allowlist names
+/// agent-level tools, so it does not apply to nodes; capabilities, autonomy
+/// and approvals do.
+pub fn evaluate_node_for_goal(spec: &GoalSpec, type_id: &str, approved: bool) -> RiskDecision {
+    evaluate_goal_request(spec, type_id, None, approved)
+}
 
-    // Level 3+: skip telegram.write approval unless listed as hard cap.
-    let mut require = spec.policy.require_approval.clone();
-    if level.allows_publish_without_approval() {
-        require.retain(|c| {
-            c != boarddo_shared::v2::caps::TELEGRAM_WRITE
-                && c != "telegram.write"
-                && c != "publisher.telegram.send"
-                && c != "telegram.publish"
-        });
-        for hard in boarddo_shared::v2::AutonomyLevel::full_autonomous_require_approval() {
-            if !require.contains(&hard) {
-                require.push(hard);
+fn evaluate_goal_request(
+    spec: &GoalSpec,
+    type_id: &str,
+    allowlist: Option<&[String]>,
+    approved: bool,
+) -> RiskDecision {
+    evaluate(&RiskRequest {
+        type_id,
+        autonomy: autonomy_from_constraints(&spec.constraints),
+        budget: &spec.budget,
+        allowlist,
+        require_approval: &spec.policy.require_approval,
+        spend_gated: spec.policy.max_daily_spend_usd > 0.0,
+        approved,
+    })
+}
+
+impl From<RiskDecision> for PolicyDecision {
+    fn from(d: RiskDecision) -> Self {
+        match d {
+            RiskDecision::Allow => PolicyDecision::Allow,
+            RiskDecision::Deny(r) => PolicyDecision::Deny(r),
+            RiskDecision::NeedsApproval { capability } => {
+                PolicyDecision::NeedsApproval { capability }
             }
         }
     }
-
-    // Soft daily spend: tools that look like paid spend need approval over cap.
-    if spec.policy.max_daily_spend_usd > 0.0
-        && is_spend_tool(&canonical)
-        && require.iter().all(|c| c != "payments")
-    {
-        // Always gate spend tools when a daily spend cap is configured.
-        return PolicyDecision::NeedsApproval {
-            capability: "payments".into(),
-        };
-    }
-
-    if require
-        .iter()
-        .any(|c| c == cap || c == &call.type_id || c == &canonical)
-    {
-        return PolicyDecision::NeedsApproval {
-            capability: cap.into(),
-        };
-    }
-
-    PolicyDecision::Allow
-}
-
-fn is_spend_tool(type_id: &str) -> bool {
-    matches!(
-        type_id,
-        "ads.launch" | "billing.charge" | "payments" | "ads.spend"
-    ) || type_id.contains("ads.")
-        || type_id.contains("billing.")
 }
 
 #[cfg(test)]
@@ -138,6 +118,7 @@ mod tests {
                 allowed_domains: vec![],
                 blocked_domains: vec![],
                 kill_switch: false,
+                replan: Default::default(),
             },
             agent_type_id: "agent.growth".into(),
             instructions: String::new(),
@@ -164,6 +145,7 @@ mod tests {
             error: None,
             started_at: now,
             finished_at: None,
+            replan: Default::default(),
         };
         (spec, run)
     }
@@ -274,5 +256,43 @@ mod tests {
             },
         );
         assert!(matches!(d, PolicyDecision::NeedsApproval { .. }));
+    }
+
+    fn call(type_id: &str) -> PlannedToolCall {
+        PlannedToolCall {
+            id: "1".into(),
+            type_id: type_id.into(),
+            config: json!({}),
+        }
+    }
+
+    #[test]
+    fn deny_unregistered_tool() {
+        let (spec, run) = spec_run();
+        let d = check_tool(&spec, &run, &call("totally.unknown"));
+        assert_eq!(d, PolicyDecision::Deny("unregistered tool `totally.unknown`".into()));
+    }
+
+    #[test]
+    fn deny_tool_without_executor() {
+        let (mut spec, run) = spec_run();
+        spec.budget = spec.budget.clone().grant(caps::AI_GENERATE);
+        let d = check_tool(&spec, &run, &call("ai.generate"));
+        assert_eq!(d, PolicyDecision::Deny("tool `ai.generate` has no executor".into()));
+    }
+
+    #[test]
+    fn irreversible_needs_approval_even_when_autonomous() {
+        let (mut spec, run) = spec_run();
+        spec.constraints = json!({ "autonomy_level": 3, "autonomy": "autonomous" });
+        spec.budget = spec.budget.clone().grant(caps::GITHUB_WRITE);
+        spec.policy.require_approval.clear();
+        let d = check_tool(&spec, &run, &call("projecthub.command"));
+        assert_eq!(
+            d,
+            PolicyDecision::NeedsApproval {
+                capability: "irreversible".into()
+            }
+        );
     }
 }

@@ -139,27 +139,114 @@ pub async fn chat_complete_messages(
     max_tokens: u64,
     timeout_ms: u64,
 ) -> Result<ChatCompletion, String> {
+    if crate::ledger::budget_limits().is_empty() {
+        let started = std::time::Instant::now();
+        let result =
+            chat_complete_inner(endpoint, model, messages, temperature, max_tokens, timeout_ms)
+                .await;
+        crate::ledger::record(chat_ledger_entry(endpoint, model, &result, started.elapsed()));
+        return result;
+    }
+
+    // Under a budget: hold the worst case before spending, record the actual
+    // cost before letting the next call see the budget.
+    let local = is_local_endpoint(&endpoint.base_url);
+    let worst = worst_case_cost_usd(endpoint, model, messages, max_tokens, local)?;
+    let reservation = crate::ledger::reserve(worst).await?;
     let started = std::time::Instant::now();
     let result =
         chat_complete_inner(endpoint, model, messages, temperature, max_tokens, timeout_ms).await;
-    let entry = match &result {
+    let mut entry = chat_ledger_entry(endpoint, model, &result, started.elapsed());
+    if let Err(err) = &result {
+        use boarddo_shared::v2::{classify_failure, failure_had_no_effect};
+        if !failure_had_no_effect(classify_failure(err)) {
+            // Tokens may have been billed without a usage report.
+            entry.cost_usd = Some(entry.cost_usd.unwrap_or(0.0).max(worst));
+        }
+    }
+    if entry.cost_usd.is_none() {
+        entry.cost_usd = Some(if local { 0.0 } else { worst });
+    }
+    crate::ledger::record_now(entry).await;
+    drop(reservation);
+    result
+}
+
+/// `true` for endpoints on this machine (self-hosted models cost nothing).
+pub(crate) fn is_local_endpoint(base_url: &str) -> bool {
+    let rest = base_url
+        .split_once("://")
+        .map(|(_, r)| r)
+        .unwrap_or(base_url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    let host = if let Some(v6) = authority.strip_prefix('[') {
+        v6.split(']').next().unwrap_or("")
+    } else {
+        authority.split(':').next().unwrap_or("")
+    };
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
+}
+
+/// Upper bound of what one call can cost: every input byte as a token plus
+/// the full output allowance. Unknown price on a remote endpoint ⇒ refused,
+/// since the budget could not be enforced.
+fn worst_case_cost_usd(
+    endpoint: &OpenAiEndpoint,
+    model: &str,
+    messages: &[ChatMessage],
+    max_tokens: u64,
+    local: bool,
+) -> Result<f64, String> {
+    let model = if model.trim().is_empty() {
+        endpoint.default_model.as_str()
+    } else {
+        model
+    };
+    let input: u64 = messages
+        .iter()
+        .map(|m| (m.content.len() + m.role.len() + 8) as u64)
+        .sum();
+    let output = if endpoint.is_anthropic() {
+        // Anthropic requests raise max_tokens to the model's minimum.
+        max_tokens.max(4096)
+    } else {
+        max_tokens
+    };
+    match boarddo_shared::v2::estimate_cost_usd(model, input, output) {
+        Some(usd) => Ok(usd),
+        None if local => Ok(0.0),
+        None => Err(format!(
+            "budget: price of model `{model}` is unknown, spend can not be bounded; call refused"
+        )),
+    }
+}
+
+fn chat_ledger_entry(
+    endpoint: &OpenAiEndpoint,
+    model: &str,
+    result: &Result<ChatCompletion, String>,
+    elapsed: Duration,
+) -> boarddo_shared::v2::LedgerEntry {
+    match result {
         Ok(c) => crate::ledger::chat_entry(
             endpoint.provider.as_str(),
             &c.model,
             Some(&c.usage),
-            started.elapsed(),
+            elapsed,
             None,
         ),
         Err(err) => crate::ledger::chat_entry(
             endpoint.provider.as_str(),
             model,
             None,
-            started.elapsed(),
+            elapsed,
             Some(err),
         ),
-    };
-    crate::ledger::record(entry);
-    result
+    }
 }
 
 async fn chat_complete_inner(
@@ -590,5 +677,62 @@ mod tests {
             "choices": [{ "message": { "role": "assistant", "content": "  hi  " } }]
         });
         assert_eq!(extract_assistant_text(&v).as_deref(), Some("hi"));
+    }
+
+    fn endpoint(provider: LlmProvider, default_model: &str) -> OpenAiEndpoint {
+        OpenAiEndpoint {
+            api_key: String::new(),
+            base_url: "https://api.example.com/v1".into(),
+            default_model: default_model.into(),
+            provider,
+        }
+    }
+
+    fn msgs(text: &str) -> Vec<ChatMessage> {
+        vec![ChatMessage { role: "user".into(), content: text.into() }]
+    }
+
+    #[test]
+    fn local_endpoint_detection() {
+        for url in ["http://localhost:11434/v1", "http://user@127.0.0.1:8000", "http://[::1]:1/v1", "LOCALHOST"] {
+            assert!(is_local_endpoint(url), "{url}");
+        }
+        for url in [
+            "https://api.openai.com/v1",
+            "http://localhost.evil.com/v1",
+            "http://127.0.0.1.nip.io",
+            "http://localhost@evil.com",
+        ] {
+            assert!(!is_local_endpoint(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn worst_case_covers_input_and_full_output() {
+        let ep = endpoint(LlmProvider::Openai, "gpt-4o");
+        let m = msgs(&"x".repeat(1000));
+        let usd = worst_case_cost_usd(&ep, "gpt-4o", &m, 1000, false).unwrap();
+        // 1012 input bytes as tokens at $2.5/M + 1000 output at $10/M.
+        let want = (1012.0 * 2.5 + 1000.0 * 10.0) / 1_000_000.0;
+        assert!((usd - want).abs() < 1e-12, "{usd} vs {want}");
+        assert_eq!(worst_case_cost_usd(&ep, "  ", &m, 1000, false), Ok(usd), "empty model ⇒ default");
+    }
+
+    #[test]
+    fn unknown_price_refused_remotely_only() {
+        let ep = endpoint(LlmProvider::Openai, "my-local-llama");
+        let err = worst_case_cost_usd(&ep, "", &msgs("hi"), 10, false).unwrap_err();
+        assert!(err.contains("unknown"), "{err}");
+        assert_eq!(worst_case_cost_usd(&ep, "", &msgs("hi"), 10, true), Ok(0.0));
+    }
+
+    #[test]
+    fn anthropic_worst_case_uses_raised_max_tokens() {
+        let oa = endpoint(LlmProvider::Openai, "gpt-4o");
+        let an = endpoint(LlmProvider::Anthropic, "gpt-4o");
+        let small = worst_case_cost_usd(&oa, "", &msgs("hi"), 100, false).unwrap();
+        let raised = worst_case_cost_usd(&an, "", &msgs("hi"), 100, false).unwrap();
+        assert_eq!(raised, worst_case_cost_usd(&oa, "", &msgs("hi"), 4096, false).unwrap());
+        assert!(raised > small);
     }
 }

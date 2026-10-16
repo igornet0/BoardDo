@@ -429,3 +429,242 @@ fn registry_includes_fetch_and_analyze() {
     assert!(reg.contains("web.fetch"));
     assert!(reg.contains("ai.analyze"));
 }
+
+#[tokio::test]
+async fn approval_resolves_only_once() {
+    use boarddo_shared::v2::{AgentApproval, ApprovalDecision};
+
+    let state = test_state().await;
+    let spec = super::spec_from_request(CreateGoalRequest {
+        title: "Approval race".into(),
+        text: "Resolve one approval twice".into(),
+        metric: "scenarios_validated".into(),
+        target: 1.0,
+        deadline: None,
+        constraints: json!({}),
+        budget: Default::default(),
+        policy: Default::default(),
+        agent_type_id: "agent.scenario".into(),
+        instructions: String::new(),
+        tools: vec![],
+        tick_interval_secs: Some(5),
+        openai_connection_id: None,
+        template_id: Some("scenario".into()),
+    });
+    state.storage.insert_goal_spec(&spec).await.unwrap();
+    let mut spec = spec;
+    let run = super::start_run(&state, &mut spec, None).await.unwrap();
+
+    let mut a = AgentApproval {
+        id: uuid::Uuid::now_v7(),
+        run_id: run.id,
+        goal_id: spec.id,
+        title: "Send".into(),
+        description: None,
+        capability: "telegram.send".into(),
+        tool_type_id: "telegram.send_message".into(),
+        payload: json!({}),
+        status: ApprovalDecision::Pending,
+        created_at: chrono::Utc::now(),
+        resolved_at: None,
+    };
+    state.storage.insert_approval(&a).await.unwrap();
+
+    a.status = ApprovalDecision::Approved;
+    a.resolved_at = Some(chrono::Utc::now());
+    assert!(state.storage.resolve_pending_approval(&a).await.unwrap());
+    a.status = ApprovalDecision::Rejected;
+    assert!(!state.storage.resolve_pending_approval(&a).await.unwrap());
+    let stored = state.storage.get_approval(a.id).await.unwrap().unwrap();
+    assert_eq!(stored.status, ApprovalDecision::Approved);
+}
+
+// ---- Unified risk policy: workflow preflight + approval binding ----
+
+async fn risk_fixture(
+    grant_github: bool,
+    require_approval: &[&str],
+) -> (
+    SharedState,
+    boarddo_shared::v2::GoalSpec,
+    boarddo_shared::v2::GoalRun,
+    boarddo_shared::WorkflowRecord,
+) {
+    use boarddo_shared::{CreateWorkflowRequest, Edge, Node, Position};
+
+    let state = test_state().await;
+    let mut spec = super::spec_from_request(CreateGoalRequest {
+        title: "Risk preflight".into(),
+        text: "Run a workflow with an irreversible node".into(),
+        metric: "scenarios_validated".into(),
+        target: 1.0,
+        deadline: None,
+        constraints: json!({}),
+        budget: Default::default(),
+        policy: Default::default(),
+        agent_type_id: "agent.scenario".into(),
+        instructions: String::new(),
+        tools: vec![],
+        tick_interval_secs: Some(5),
+        openai_connection_id: None,
+        template_id: Some("scenario".into()),
+    });
+    spec.budget.allow.retain(|c| c.as_str() != "github.write");
+    if grant_github {
+        spec.budget = spec.budget.clone().grant("github.write");
+    }
+    spec.policy.require_approval = require_approval.iter().map(|s| s.to_string()).collect();
+    state.storage.insert_goal_spec(&spec).await.unwrap();
+    let run = super::start_run(&state, &mut spec, None).await.unwrap();
+
+    let node = |id: &str, type_id: &str, config: serde_json::Value| Node {
+        id: id.into(),
+        type_id: type_id.into(),
+        category: None,
+        position: Position { x: 0.0, y: 0.0 },
+        config,
+    };
+    let wf = state
+        .storage
+        .create_workflow(CreateWorkflowRequest {
+            name: "risky".into(),
+            description: String::new(),
+            nodes: vec![
+                node("t", "trigger.manual", json!({})),
+                node("cmd", "projecthub.command", json!({ "command": "noop" })),
+            ],
+            edges: vec![Edge {
+                id: "e".into(),
+                source: "t".into(),
+                target: "cmd".into(),
+                source_port: None,
+                target_port: None,
+            }],
+        })
+        .await
+        .unwrap();
+    (state, spec, run, wf)
+}
+
+fn call(type_id: &str, config: serde_json::Value) -> boarddo_shared::v2::PlannedToolCall {
+    boarddo_shared::v2::PlannedToolCall {
+        id: "c1".into(),
+        type_id: type_id.into(),
+        config,
+    }
+}
+
+#[tokio::test]
+async fn workflow_run_with_irreversible_node_needs_approval() {
+    let (state, spec, run, wf) = risk_fixture(true, &["github.write"]).await;
+    let err = super::tools::ToolGateway::new()
+        .execute(&state, &spec, &run, &call("workflow.run", json!({ "workflow_id": wf.id })))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        boarddo_shared::v2::parse_needs_approval(&err).as_deref(),
+        Some("github.write"),
+        "{err}"
+    );
+    let execs = state.storage.list_executions_for_workflow(wf.id, 5).await.unwrap();
+    assert!(execs.is_empty(), "nothing may execute before approval");
+}
+
+#[tokio::test]
+async fn workflow_node_without_capability_is_denied() {
+    let (state, spec, run, wf) = risk_fixture(false, &[]).await;
+    for type_id in ["workflow.run", "workflow.activate"] {
+        let err = super::tools::ToolGateway::new()
+            .execute(&state, &spec, &run, &call(type_id, json!({ "workflow_id": wf.id })))
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("policy: node `cmd`"), "{type_id}: {err}");
+    }
+    let stored = state.storage.get_workflow(wf.id).await.unwrap().unwrap();
+    assert_ne!(stored.status, boarddo_shared::WorkflowStatus::Active);
+}
+
+#[tokio::test]
+async fn approved_workflow_call_is_bound_to_version() {
+    let (state, spec, run, wf) = risk_fixture(true, &["github.write"]).await;
+    let pinned =
+        super::tools::pin_approval_config(&state, &json!({ "workflow_id": wf.id })).await;
+    assert_eq!(pinned[super::tools::APPROVED_WORKFLOW_VERSION], json!(wf.version));
+
+    // Unpinned approval is rejected.
+    let err = super::tick::execute_approved_tool(
+        &state,
+        &spec,
+        &run,
+        &call("workflow.activate", json!({ "workflow_id": wf.id })),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.contains("not bound to a workflow version"), "{err}");
+
+    // Edit after approval invalidates it.
+    let mut def = wf.definition.clone();
+    def.nodes[1].config = json!({ "command": "rm -rf" });
+    state
+        .storage
+        .update_workflow(
+            wf.id,
+            boarddo_shared::UpdateWorkflowRequest {
+                name: wf.name.clone(),
+                description: String::new(),
+                status: wf.status,
+                nodes: def.nodes,
+                edges: def.edges,
+            },
+        )
+        .await
+        .unwrap();
+    let err = super::tick::execute_approved_tool(
+        &state,
+        &spec,
+        &run,
+        &call("workflow.activate", pinned.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.contains("workflow changed since approval"), "{err}");
+
+    // Re-pinned approval on the current version activates.
+    let repinned =
+        super::tools::pin_approval_config(&state, &json!({ "workflow_id": wf.id })).await;
+    let out = super::tick::execute_approved_tool(&state, &spec, &run, &call("workflow.activate", repinned))
+        .await
+        .unwrap();
+    // A manual-trigger graph is not armed by the runtime (it falls back to
+    // draft), so assert on the activation result itself.
+    assert_eq!(out["ok"], json!(true), "{out}");
+    assert_eq!(out["workflow"]["status"], json!("active"), "{out}");
+}
+
+#[tokio::test]
+async fn approval_does_not_outrank_kill_switch_or_deny() {
+    let (state, mut spec, run, wf) = risk_fixture(true, &["github.write"]).await;
+    let pinned =
+        super::tools::pin_approval_config(&state, &json!({ "workflow_id": wf.id })).await;
+
+    spec.policy.kill_switch = true;
+    let err = super::tick::execute_approved_tool(
+        &state,
+        &spec,
+        &run,
+        &call("workflow.activate", pinned.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert!(err.starts_with("policy:"), "{err}");
+
+    // Capability revoked after the approval was queued.
+    spec.policy.kill_switch = false;
+    spec.budget = spec.budget.clone().forbid("github.write");
+    let err = super::tick::execute_approved_tool(&state, &spec, &run, &call("workflow.activate", pinned))
+        .await
+        .unwrap_err();
+    assert!(err.starts_with("policy: node `cmd`"), "{err}");
+    let stored = state.storage.get_workflow(wf.id).await.unwrap().unwrap();
+    assert_ne!(stored.status, boarddo_shared::WorkflowStatus::Active);
+}

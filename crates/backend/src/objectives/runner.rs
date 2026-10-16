@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use boarddo_shared::v2::{
     Objective, ObjectiveAssistMode, ObjectiveAssistRequest, ObjectiveItem, ObjectiveItemKind,
-    ObjectiveItemStatus, ObjectiveStatus, RunObjectiveRequest,
+    ObjectiveItemStatus, ObjectiveStatus, RunObjectiveRequest, TaskKind,
 };
 use boarddo_shared::{ExecutionStatus, UpdateWorkflowRequest, WorkflowRecord, WorkflowStatus};
 use chrono::Utc;
@@ -351,6 +351,12 @@ async fn execute_item(state: &SharedState, o: &Objective, item_id: &str) -> Resu
         .await
         .map_err(|e| e.to_string())?;
     match exec.status {
+        // Completed with an error means a node reported a failure and the
+        // run went on: the item is not done.
+        ExecutionStatus::Completed if exec.error.is_some() => Err(format!(
+            "scenario degraded: {}",
+            exec.error.unwrap_or_default()
+        )),
         ExecutionStatus::Completed => {
             let result = scenario::extract_result(&nodes).ok_or_else(|| {
                 "scenario finished without output — give the final node id `result`".to_string()
@@ -421,7 +427,7 @@ pub async fn ensure_scenario(
         return Err(tr(o, "Пункт «Задача» выполняется в ProjectHub, не сценарием", "Task items run in ProjectHub, not as a scenario"));
     }
 
-    let llm: ObjectiveLlm = llm::resolve(state, o).await?;
+    let llm: ObjectiveLlm = llm::resolve_for(state, o, TaskKind::Generation).await?;
     let def = scenario::build_definition(o, item, &llm.connection_id.to_string(), &llm.model);
     let fresh_hash = scenario::definition_hash(&def.nodes, &def.edges);
 
@@ -661,7 +667,7 @@ async fn auto_refine(state: &SharedState, id: Uuid, summary: String) -> bool {
         ..Default::default()
     };
     let project = project_context(&o).await;
-    let drafted = match llm::resolve(state, &o).await {
+    let drafted = match llm::resolve_for(state, &o, TaskKind::Planning).await {
         Ok(llm) => super::assist::draft(&llm, &o, &req, project.as_deref()).await,
         Err(err) => Err(err),
     };
@@ -690,7 +696,7 @@ async fn auto_refine(state: &SharedState, id: Uuid, summary: String) -> bool {
 }
 
 async fn evaluate(state: &SharedState, o: &Objective) -> Result<(bool, String), String> {
-    let llm = llm::resolve(state, o).await?;
+    let llm = llm::resolve_for(state, o, TaskKind::Reasoning).await?;
     let ru = is_russian(objective_locale(o));
     let mut results = String::new();
     for id in o.ordered_ids() {

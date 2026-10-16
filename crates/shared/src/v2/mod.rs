@@ -17,6 +17,7 @@
 //! graph so SBDO can show high-level nodes while SmartDo stays deterministic.
 
 pub mod agent;
+pub mod analytics;
 pub mod artifact;
 pub mod capability;
 pub mod content;
@@ -26,16 +27,21 @@ pub mod goal;
 pub mod goal_runtime;
 pub mod ledger;
 pub mod marketing;
+pub mod model_routing;
 pub mod node_contract;
 pub mod objective;
 pub mod ports;
+pub mod replan_policy;
 pub mod research;
+pub mod risk_policy;
 pub mod sales;
 pub mod templates;
+pub mod tool_registry;
 pub mod web;
 pub mod workflow_contract;
 
 pub use agent::*;
+pub use analytics::*;
 pub use artifact::*;
 pub use capability::*;
 pub use content::*;
@@ -45,12 +51,16 @@ pub use goal::*;
 pub use goal_runtime::*;
 pub use ledger::*;
 pub use marketing::*;
+pub use model_routing::*;
 pub use node_contract::*;
 pub use objective::*;
 pub use ports::*;
+pub use replan_policy::*;
 pub use research::*;
+pub use risk_policy::*;
 pub use sales::*;
 pub use templates::*;
+pub use tool_registry::*;
 pub use web::*;
 pub use workflow_contract::*;
 

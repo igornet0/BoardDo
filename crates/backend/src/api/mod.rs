@@ -7,6 +7,8 @@ mod health;
 mod ingress;
 mod media;
 mod objectives;
+mod analytics;
+mod journal;
 mod ledger;
 mod sales;
 mod projecthub;
@@ -180,6 +182,7 @@ pub fn router(state: SharedState) -> Router {
         .merge(
             Router::new()
                 .route("/api/tools", get(tools::list).post(tools::create))
+                .route("/api/tools/catalog", get(tools::catalog))
                 .route("/api/tools/find", get(tools::find))
                 .route("/api/tools/generate", post(tools::generate))
                 .route("/api/tools/runtime", get(tools::runtime).put(tools::set_runtime))
@@ -195,6 +198,8 @@ pub fn router(state: SharedState) -> Router {
         .nest("/api", objectives::router())
         .nest("/api", sales::router())
         .nest("/api", ledger::router())
+        .nest("/api", analytics::router())
+        .nest("/api", journal::router())
         .nest("/api", projecthub::router())
         .nest("/api", alertwim::router())
         .layer(cors)

@@ -2,6 +2,7 @@ pub mod context;
 pub mod engine;
 pub mod executor;
 pub mod expr;
+pub mod journal;
 pub mod node_state;
 pub mod nodes;
 pub mod registry;

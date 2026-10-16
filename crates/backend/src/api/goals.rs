@@ -412,7 +412,9 @@ async fn resolve_approval(
     }
     a.status = decision;
     a.resolved_at = Some(Utc::now());
-    state.storage.update_approval(&a).await.map_err(internal)?;
+    if !state.storage.resolve_pending_approval(&a).await.map_err(internal)? {
+        return Err((StatusCode::CONFLICT, "already resolved".into()));
+    }
 
     if decision == ApprovalDecision::Approved {
         if let (Some(spec), Some(run)) = (

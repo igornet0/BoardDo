@@ -1,6 +1,6 @@
 //! AI connection used to draft, execute and evaluate an objective.
 
-use boarddo_shared::v2::Objective;
+use boarddo_shared::v2::{Objective, TaskKind, is_retryable_on_other_model};
 use boarddo_shared::{LlmProvider, is_llm_connection_type, llm_provider};
 use uuid::Uuid;
 
@@ -13,6 +13,10 @@ pub struct ObjectiveLlm {
     pub connection_id: Uuid,
     pub endpoint: OpenAiEndpoint,
     pub model: String,
+    /// Ordered alternatives tried when the primary fails in a way another
+    /// model could fix (timeouts, overload, unknown model). Never on budget
+    /// or policy refusals.
+    pub fallbacks: Vec<(Uuid, OpenAiEndpoint, String)>,
 }
 
 impl ObjectiveLlm {
@@ -34,22 +38,64 @@ impl ObjectiveLlm {
                 content: user.to_string(),
             },
         ];
-        chat_complete_messages(
-            &self.endpoint,
-            &self.model,
-            &messages,
-            temperature,
-            max_tokens,
-            timeout_ms,
-        )
-        .await
-        .map(|c| c.text)
+        let primary = (self.connection_id, &self.endpoint, &self.model);
+        let rest = self.fallbacks.iter().map(|(id, e, m)| (*id, e, m));
+        let mut errors = Vec::new();
+        let mut last = String::new();
+        for (connection_id, endpoint, model) in std::iter::once(primary).chain(rest) {
+            match chat_complete_messages(
+                endpoint,
+                model,
+                &messages,
+                temperature,
+                max_tokens,
+                timeout_ms,
+            )
+            .await
+            {
+                Ok(c) => {
+                    crate::routing::record_success(connection_id, model);
+                    return Ok(c.text);
+                }
+                Err(e) if is_retryable_on_other_model(&e) => {
+                    crate::routing::record_failure(connection_id, model);
+                    tracing::warn!(%model, error = %e, "model failed, trying next");
+                    errors.push(format!("{model}: {e}"));
+                    last = e;
+                }
+                Err(e) => {
+                    errors.push(format!("{model}: {e}"));
+                    last = e;
+                    break;
+                }
+            }
+        }
+        // Single attempt: keep the provider's message verbatim.
+        Err(if errors.len() == 1 {
+            last
+        } else {
+            errors.join("; ")
+        })
     }
 }
 
-/// Objective's own connection, else the first usable one (Claude preferred).
-pub async fn resolve(state: &SharedState, objective: &Objective) -> Result<ObjectiveLlm, String> {
-    resolve_connection(state, objective.connection_id, objective.model.as_deref()).await
+/// Routed model for `task`: the objective's explicit connection/model are
+/// kept; otherwise the router picks by task, capabilities, health and budget.
+pub async fn resolve_for(
+    state: &SharedState,
+    objective: &Objective,
+    task: TaskKind,
+) -> Result<ObjectiveLlm, String> {
+    resolve_connection_for(state, objective.connection_id, objective.model.as_deref(), task).await
+}
+
+pub async fn resolve_connection_for(
+    state: &SharedState,
+    connection_id: Option<Uuid>,
+    model: Option<&str>,
+    task: TaskKind,
+) -> Result<ObjectiveLlm, String> {
+    crate::routing::resolve(state, task, connection_id, model, Default::default()).await
 }
 
 /// `connection_id` / `model` when given, else the default AI connection and its model.
@@ -83,6 +129,7 @@ pub async fn resolve_connection(
         connection_id,
         endpoint,
         model,
+        fallbacks: Vec::new(),
     })
 }
 

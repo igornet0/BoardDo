@@ -359,7 +359,10 @@ mod tests {
                 None,
             )
             .await;
-        assert!(result.error.is_none(), "{:?}", result.error);
+        // Soft failure: the run goes on, but is marked degraded.
+        assert_eq!(result.status, boarddo_shared::ExecutionStatus::Completed);
+        let err = result.error.as_deref().unwrap_or_default();
+        assert!(err.starts_with("node `hidden`: degraded:") && err.contains("member list hidden"), "{err}");
         let sends = gw.sends.lock().unwrap();
         assert_eq!(
             sends[0].2,

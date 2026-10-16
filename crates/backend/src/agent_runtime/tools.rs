@@ -3,8 +3,9 @@
 use std::time::Duration;
 
 use boarddo_shared::v2::{
-    GoalRun, GoalSpec, PlannedToolCall, RunContext, WorkflowPlan, capability_for_tool,
-    resolve_tool_alias,
+    GoalRun, GoalSpec, PlannedToolCall, RiskDecision, RunContext, WorkflowPlan,
+    capability_for_tool, is_passive_kind, lookup_tool, missing_required_inputs,
+    needs_approval_error, resolve_tool_alias, verify_success,
 };
 use boarddo_shared::{
     AgentGraphOp, AgentWorkflowSnapshot, ExecutionStatus, Node, Position, WorkflowDefinition,
@@ -14,6 +15,8 @@ use chrono::Utc;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use super::execution::{RetryPolicy, run_guarded};
+use super::policy::evaluate_node_for_goal;
 use crate::api::run::spawn_execution;
 use crate::engine::context::ExecutionContext;
 use crate::engine::registry::{NodeOutput, NodeRegistry};
@@ -26,12 +29,14 @@ use boarddo_telegram::TelegramUserGateway;
 
 pub struct ToolGateway {
     registry: NodeRegistry,
+    retry: RetryPolicy,
 }
 
 impl ToolGateway {
     pub fn new() -> Self {
         Self {
             registry: NodeRegistry::with_defaults(),
+            retry: RetryPolicy::default(),
         }
     }
 
@@ -41,6 +46,20 @@ impl ToolGateway {
         spec: &GoalSpec,
         run: &GoalRun,
         call: &PlannedToolCall,
+    ) -> Result<Value, String> {
+        self.execute_with_approval(state, spec, run, call, false)
+            .await
+    }
+
+    /// `approved` is set only when a human approved this exact call; it lets
+    /// workflow nodes that need approval run, but never lifts a deny.
+    pub async fn execute_with_approval(
+        &self,
+        state: &SharedState,
+        spec: &GoalSpec,
+        run: &GoalRun,
+        call: &PlannedToolCall,
+        approved: bool,
     ) -> Result<Value, String> {
         let canonical = resolve_tool_alias(&call.type_id).to_string();
         let call = PlannedToolCall {
@@ -59,7 +78,43 @@ impl ToolGateway {
         if !run_ctx.can(cap) {
             return Err(format!("capability `{cap}` not allowed"));
         }
+        let descriptor = lookup_tool(&call.type_id);
+        if let Some(d) = descriptor {
+            let missing = missing_required_inputs(d, &call.config);
+            if !missing.is_empty() {
+                return Err(format!("missing required input(s): {}", missing.join(", ")));
+            }
+        }
 
+        let call = &call;
+        run_guarded(
+            &state.storage,
+            descriptor,
+            run.id,
+            &call.type_id,
+            &call.config,
+            self.retry,
+            || async move {
+                let result = self.dispatch(state, spec, run, call, approved).await?;
+                // A tool that returned without error has not necessarily succeeded:
+                // check the declared result shape and any failure it reports in-band.
+                if let Some(d) = descriptor {
+                    verify_success(d, &result).map_err(|e| e.to_string())?;
+                }
+                Ok(result)
+            },
+        )
+        .await
+    }
+
+    async fn dispatch(
+        &self,
+        state: &SharedState,
+        spec: &GoalSpec,
+        run: &GoalRun,
+        call: &PlannedToolCall,
+        approved: bool,
+    ) -> Result<Value, String> {
         match call.type_id.as_str() {
             "memory.write" => memory_write(state, run, &call.config).await,
             "memory.read" => memory_read(state, run, &call.config).await,
@@ -77,17 +132,19 @@ impl ToolGateway {
             }
             "workflow.list" => workflow_list(state).await,
             "workflow.get" => workflow_get(state, &call.config).await,
-            "workflow.create" => workflow_create(state, spec, run, &call.config).await,
-            "workflow.update" => workflow_update(state, spec, run, &call.config).await,
+            "workflow.create" => workflow_create(state, spec, run, &call.config, approved).await,
+            "workflow.update" => workflow_update(state, spec, run, &call.config, approved).await,
             "workflow.validate" => workflow_validate(state, &call.config).await,
-            "workflow.run" => workflow_run(state, spec, run, &call.config).await,
-            "workflow.activate" => workflow_activate(state, &call.config).await,
+            "workflow.run" => workflow_run(state, spec, run, &call.config, approved).await,
+            "workflow.activate" => workflow_activate(state, spec, &call.config, approved).await,
             "workflow.get_execution" => workflow_get_execution(state, &call.config).await,
             "workflow.list_executions" => workflow_list_executions(state, &call.config).await,
-            "scenario.apply_ops" => scenario_apply_ops(state, spec, run, &call.config).await,
+            "scenario.apply_ops" => {
+                scenario_apply_ops(state, spec, run, &call.config, approved).await
+            }
             "goal.propose_plan" => goal_propose_plan(state, spec, run).await,
             "goal.materialize_plan" => {
-                goal_materialize_plan(state, spec, run, &call.config).await
+                goal_materialize_plan(state, spec, run, &call.config, approved).await
             }
             "campaign.bootstrap_plan" => campaign_bootstrap_plan(state, spec, run).await,
             "connection.list" => connection_list(state).await,
@@ -105,7 +162,8 @@ impl ToolGateway {
             | "idea.combine" | "idea.validate" | "idea.research" | "strategy.create"
             | "strategy.update" | "brief.create" | "content.create" | "content.adapt"
             | "content.critique" | "content.fact_check" | "content.expand"
-            | "content.shorten" | "content.translate" | "insight.create" | "analytics.read" => {
+            | "content.shorten" | "content.translate" | "insight.create" | "analytics.read"
+            | "asset.generate" | "asset.attach" => {
                 crate::content::tools::execute(state, spec, run, &call.type_id, &call.config).await
             }
             "lead.create" | "lead.update" | "lead.score" | "conversation.classify"
@@ -123,7 +181,7 @@ impl ToolGateway {
             | "tool.delete" => {
                 crate::tools::agent::execute(state, &call.type_id, &call.config).await
             }
-            other => self.execute_node(state, spec, run, &call, other).await,
+            other => self.execute_node(state, spec, run, call, other).await,
         }
     }
 
@@ -303,12 +361,80 @@ fn definition_from_config(config: &Value, fallback_title: &str, fallback_text: &
     stub_scenario_graph(fallback_title, fallback_text)
 }
 
+/// Config key that binds a human approval to the workflow version it was
+/// given for; set by the runtime when the approval is queued.
+pub const APPROVED_WORKFLOW_VERSION: &str = "_approved_workflow_version";
+
+/// Check every executable node of a workflow against the goal's risk policy
+/// before it may run or be activated. Unknown node types fail closed.
+pub fn preflight_workflow(
+    spec: &GoalSpec,
+    def: &WorkflowDefinition,
+    approved: bool,
+) -> Result<(), String> {
+    for node in &def.nodes {
+        if lookup_tool(&node.type_id).is_some_and(|d| is_passive_kind(d.kind)) {
+            continue;
+        }
+        match evaluate_node_for_goal(spec, &node.type_id, approved) {
+            RiskDecision::Allow => {}
+            RiskDecision::Deny(reason) => {
+                return Err(format!(
+                    "policy: node `{}` ({}): {reason}",
+                    node.id, node.type_id
+                ));
+            }
+            RiskDecision::NeedsApproval { capability } => {
+                return Err(needs_approval_error(
+                    &capability,
+                    &format!("node `{}` ({})", node.id, node.type_id),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// An approval covers the workflow as it was when approved: any later edit
+/// bumps the version and invalidates it.
+fn check_approved_version(
+    config: &Value,
+    wf: &WorkflowRecord,
+    approved: bool,
+) -> Result<(), String> {
+    if !approved {
+        return Ok(());
+    }
+    match config.get(APPROVED_WORKFLOW_VERSION).and_then(Value::as_u64) {
+        Some(v) if v == u64::from(wf.version) => Ok(()),
+        Some(v) => Err(format!(
+            "workflow changed since approval (approved v{v}, now v{}); approve again",
+            wf.version
+        )),
+        None => Err("approval is not bound to a workflow version; approve again".into()),
+    }
+}
+
+/// Bind an approval request to the current version of the workflow it targets.
+pub async fn pin_approval_config(state: &SharedState, config: &Value) -> Value {
+    let mut config = config.clone();
+    if let Ok(id) = uuid_field(&config, "workflow_id") {
+        if let Ok(Some(wf)) = state.storage.get_workflow(id).await {
+            if let Some(obj) = config.as_object_mut() {
+                obj.insert(APPROVED_WORKFLOW_VERSION.into(), json!(wf.version));
+            }
+        }
+    }
+    config
+}
+
 async fn maybe_validate_run(
     state: &SharedState,
     spec: &GoalSpec,
     run: &GoalRun,
     wf: &WorkflowRecord,
     config: &Value,
+    approved: bool,
 ) -> Result<Value, String> {
     let mut out = json!({ "workflow": wf });
     let do_validate = config
@@ -329,6 +455,7 @@ async fn maybe_validate_run(
             "text": spec.text,
         }));
         let wait = config.get("wait").and_then(Value::as_bool).unwrap_or(true);
+        preflight_workflow(spec, &wf.definition, approved)?;
         let exec = run_and_maybe_wait(state, wf, trigger, wait).await?;
         out["execution"] = exec;
     }
@@ -341,6 +468,7 @@ async fn workflow_create(
     spec: &GoalSpec,
     run: &GoalRun,
     config: &Value,
+    approved: bool,
 ) -> Result<Value, String> {
     let name = config
         .get("name")
@@ -360,7 +488,7 @@ async fn workflow_create(
     crate::workflow::agent_ops::link_workflow(state, run.id, wf.id)
         .await
         .map_err(|e| e.to_string())?;
-    maybe_validate_run(state, spec, run, &wf, config).await
+    maybe_validate_run(state, spec, run, &wf, config, approved).await
 }
 
 async fn workflow_update(
@@ -368,6 +496,7 @@ async fn workflow_update(
     spec: &GoalSpec,
     run: &GoalRun,
     config: &Value,
+    approved: bool,
 ) -> Result<Value, String> {
     let id = uuid_field(config, "workflow_id")?;
     let existing = state
@@ -376,6 +505,7 @@ async fn workflow_update(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "workflow not found".to_string())?;
+    check_approved_version(config, &existing, approved)?;
     let name = config
         .get("name")
         .and_then(Value::as_str)
@@ -396,6 +526,10 @@ async fn workflow_update(
     } else {
         existing.definition.clone()
     };
+    if status == WorkflowStatus::Active {
+        // An active workflow fires on its own triggers, so it is checked now.
+        preflight_workflow(spec, &definition, approved)?;
+    }
     let wf = update_workflow(state, id, name, description, status, definition)
         .await
         .map_err(|e| e.to_string())?
@@ -403,7 +537,7 @@ async fn workflow_update(
     crate::workflow::agent_ops::link_workflow(state, run.id, wf.id)
         .await
         .map_err(|e| e.to_string())?;
-    maybe_validate_run(state, spec, run, &wf, config).await
+    maybe_validate_run(state, spec, run, &wf, config, approved).await
 }
 
 fn parse_status(s: &str) -> WorkflowStatus {
@@ -430,6 +564,7 @@ async fn workflow_run(
     spec: &GoalSpec,
     run: &GoalRun,
     config: &Value,
+    approved: bool,
 ) -> Result<Value, String> {
     let id = uuid_field(config, "workflow_id")?;
     let wf = state
@@ -438,6 +573,8 @@ async fn workflow_run(
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "workflow not found".to_string())?;
+    check_approved_version(config, &wf, approved)?;
+    preflight_workflow(spec, &wf.definition, approved)?;
     crate::workflow::agent_ops::link_workflow(state, run.id, wf.id)
         .await
         .map_err(|e| e.to_string())?;
@@ -449,8 +586,21 @@ async fn workflow_run(
     run_and_maybe_wait(state, &wf, trigger, wait).await
 }
 
-async fn workflow_activate(state: &SharedState, config: &Value) -> Result<Value, String> {
+async fn workflow_activate(
+    state: &SharedState,
+    spec: &GoalSpec,
+    config: &Value,
+    approved: bool,
+) -> Result<Value, String> {
     let id = uuid_field(config, "workflow_id")?;
+    let current = state
+        .storage
+        .get_workflow(id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "workflow not found".to_string())?;
+    check_approved_version(config, &current, approved)?;
+    preflight_workflow(spec, &current.definition, approved)?;
     let wf = state
         .storage
         .set_workflow_status(id, WorkflowStatus::Active)
@@ -547,6 +697,7 @@ async fn scenario_apply_ops(
     spec: &GoalSpec,
     run: &GoalRun,
     config: &Value,
+    approved: bool,
 ) -> Result<Value, String> {
     let ops: Vec<AgentGraphOp> = config
         .get("ops")
@@ -560,17 +711,22 @@ async fn scenario_apply_ops(
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "workflow not found".to_string())?;
+        check_approved_version(config, &existing, approved)?;
         let applied = apply_ops(&snapshot_from_record(&existing), ops)?;
+        let definition = WorkflowDefinition {
+            nodes: applied.nodes,
+            edges: applied.edges,
+        };
+        if existing.status == WorkflowStatus::Active {
+            preflight_workflow(spec, &definition, approved)?;
+        }
         let wf = update_workflow(
             state,
             id,
             applied.name.unwrap_or(existing.name),
             applied.description.unwrap_or(existing.description),
             existing.status,
-            WorkflowDefinition {
-                nodes: applied.nodes,
-                edges: applied.edges,
-            },
+            definition,
         )
         .await
         .map_err(|e| e.to_string())?
@@ -656,6 +812,7 @@ async fn goal_materialize_plan(
     spec: &GoalSpec,
     run: &GoalRun,
     config: &Value,
+    approved: bool,
 ) -> Result<Value, String> {
     let plan: WorkflowPlan = if let Some(raw) = config.get("plan") {
         serde_json::from_value(raw.clone()).map_err(|e| e.to_string())?
@@ -682,7 +839,7 @@ async fn goal_materialize_plan(
         obj.insert("nodes".into(), json!(definition.nodes));
         obj.insert("edges".into(), json!(definition.edges));
     }
-    workflow_create(state, spec, run, &create_cfg).await
+    workflow_create(state, spec, run, &create_cfg, approved).await
 }
 
 async fn connection_list(state: &SharedState) -> Result<Value, String> {

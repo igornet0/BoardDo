@@ -3,7 +3,7 @@
 use boarddo_shared::v2::{
     ContentDraftStatus, ConversationIntent, ConversationMessage, Experiment, ExperimentDecision,
     ExperimentUpdate, GoalRun, GoalSpec, Lead, LeadStage, Learning, MarketingConversation,
-    MarketingStage, PlannedToolCall, StrategyDelta, TickPlan, autonomy_from_constraints,
+    MarketingStage, PlannedToolCall, StrategyDelta, TickPlan,
     classify_intent, default_marketing_strategy, market_from_constraints, product_from_constraints,
     product_url_from_constraints, score_lead_signals, stage_from_score,
 };
@@ -775,24 +775,18 @@ pub async fn process_inbound(
     conv.updated_at = now;
     state.storage.upsert_conversation(&conv).await?;
 
-    // Bump goal metric from real (or demo-counted) interested+ leads.
-    if !simulated
-        && matches!(
-            lead.stage,
-            LeadStage::Interested | LeadStage::Qualified | LeadStage::Converted
-        )
-    {
+    // Bump goal metric from real interested+ leads only.
+    let interested = matches!(
+        lead.stage,
+        LeadStage::Interested | LeadStage::Qualified | LeadStage::Converted
+    );
+    if interested && !simulated {
         let _ = crate::agent_runtime::record_lead(state, spec, 1.0).await;
-    } else if simulated
-        && matches!(
-            lead.stage,
-            LeadStage::Interested | LeadStage::Qualified | LeadStage::Converted
-        )
-    {
-        // Demo: still advance the run metric so the loop is visible, but lead is marked SIMULATED.
-        let _ = crate::agent_runtime::record_lead(state, spec, 1.0).await;
-        lead.metadata
-            .insert("metric_note".into(), json!("SIMULATED lead counted for demo loop"));
+    } else if interested {
+        lead.metadata.insert(
+            "metric_note".into(),
+            json!("SIMULATED lead: not counted towards the goal"),
+        );
         state.storage.update_lead(&lead).await?;
     }
 
@@ -821,13 +815,3 @@ pub async fn process_inbound(
     Ok((lead, conv))
 }
 
-pub fn apply_autonomy_policy(spec: &GoalSpec, type_id: &str) -> Option<String> {
-    let level = autonomy_from_constraints(&spec.constraints);
-    if level.observe_only() && boarddo_shared::v2::is_outbound_tool(type_id) {
-        return Some(format!(
-            "autonomy level {} forbids outbound/publish tools",
-            level.0
-        ));
-    }
-    None
-}

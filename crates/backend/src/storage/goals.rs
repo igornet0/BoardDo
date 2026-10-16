@@ -50,6 +50,7 @@ struct GoalRunRow {
     error: Option<String>,
     started_at: String,
     finished_at: Option<String>,
+    replan: String,
 }
 
 #[derive(FromRow)]
@@ -140,6 +141,7 @@ impl Storage {
                 error TEXT,
                 started_at TEXT NOT NULL,
                 finished_at TEXT,
+                replan TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY(goal_id) REFERENCES goal_specs(id) ON DELETE CASCADE
             );
 
@@ -203,6 +205,9 @@ impl Storage {
         )
         .execute(&self.pool)
         .await?;
+        let _ = sqlx::query("ALTER TABLE goal_runs ADD COLUMN replan TEXT NOT NULL DEFAULT '{}'")
+            .execute(&self.pool)
+            .await;
         Ok(())
     }
 
@@ -298,8 +303,8 @@ impl Storage {
             INSERT INTO goal_runs (
                 id, goal_id, status, current, target, strategy, actions_today, actions_day,
                 tick_count, last_tick_at, next_tick_at, last_observe, last_think, error,
-                started_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                started_at, finished_at, replan
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(run.id.to_string())
@@ -318,6 +323,7 @@ impl Storage {
         .bind(&run.error)
         .bind(run.started_at.to_rfc3339())
         .bind(run.finished_at.map(|d| d.to_rfc3339()))
+        .bind(serde_json::to_string(&run.replan)?)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -329,7 +335,7 @@ impl Storage {
             UPDATE goal_runs SET
                 status = ?, current = ?, target = ?, strategy = ?, actions_today = ?,
                 actions_day = ?, tick_count = ?, last_tick_at = ?, next_tick_at = ?,
-                last_observe = ?, last_think = ?, error = ?, finished_at = ?
+                last_observe = ?, last_think = ?, error = ?, finished_at = ?, replan = ?
             WHERE id = ?
             "#,
         )
@@ -346,6 +352,7 @@ impl Storage {
         .bind(&run.last_think)
         .bind(&run.error)
         .bind(run.finished_at.map(|d| d.to_rfc3339()))
+        .bind(serde_json::to_string(&run.replan)?)
         .bind(run.id.to_string())
         .execute(&self.pool)
         .await?;
@@ -373,6 +380,15 @@ impl Storage {
     pub async fn list_goal_runs(&self) -> anyhow::Result<Vec<GoalRun>> {
         let rows: Vec<GoalRunRow> =
             sqlx::query_as("SELECT * FROM goal_runs ORDER BY started_at DESC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.into_iter().map(row_to_run).collect()
+    }
+
+    pub async fn list_goal_runs_for_goal(&self, goal_id: Uuid) -> anyhow::Result<Vec<GoalRun>> {
+        let rows: Vec<GoalRunRow> =
+            sqlx::query_as("SELECT * FROM goal_runs WHERE goal_id = ? ORDER BY started_at DESC")
+                .bind(goal_id.to_string())
                 .fetch_all(&self.pool)
                 .await?;
         rows.into_iter().map(row_to_run).collect()
@@ -581,6 +597,22 @@ impl Storage {
         row.map(row_to_approval).transpose()
     }
 
+    /// Moves a pending approval to its decision in one statement; `false`
+    /// when another request resolved it first.
+    pub async fn resolve_pending_approval(&self, a: &AgentApproval) -> anyhow::Result<bool> {
+        let done = sqlx::query(
+            "UPDATE agent_approvals SET status = ?, resolved_at = ? WHERE id = ? AND status = ?",
+        )
+        .bind(approval_status(&a.status))
+        .bind(a.resolved_at.map(|d| d.to_rfc3339()))
+        .bind(a.id.to_string())
+        .bind(approval_status(&ApprovalDecision::Pending))
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(done == 1)
+    }
+
     pub async fn update_approval(&self, a: &AgentApproval) -> anyhow::Result<()> {
         sqlx::query("UPDATE agent_approvals SET status = ?, resolved_at = ? WHERE id = ?")
             .bind(approval_status(&a.status))
@@ -707,6 +739,7 @@ fn row_to_run(row: GoalRunRow) -> anyhow::Result<GoalRun> {
         error: row.error,
         started_at: parse_dt(&row.started_at)?,
         finished_at: row.finished_at.as_deref().map(parse_dt).transpose()?,
+        replan: serde_json::from_str(&row.replan).unwrap_or_default(),
     })
 }
 
@@ -843,6 +876,7 @@ mod tests {
             error: None,
             started_at: Utc::now(),
             finished_at: None,
+            replan: Default::default(),
         };
         storage.insert_goal_run(&run).await.unwrap();
         let due = storage.list_due_goal_runs(Utc::now()).await.unwrap();

@@ -445,6 +445,7 @@ mod tests {
             error: None,
             started_at: now,
             finished_at: None,
+            replan: Default::default(),
         };
         let plan = scripted_plan(&spec, &run, &[]);
         assert!(!plan.new_hypotheses.is_empty());

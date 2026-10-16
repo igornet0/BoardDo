@@ -62,7 +62,7 @@ impl ToolAuthor for ObjectiveLlm {
 }
 
 pub async fn generate(state: &SharedState, req: GenerateToolRequest) -> Result<Value, ToolError> {
-    let llm = llm::resolve_connection(state, req.connection_id, req.model.as_deref())
+    let llm = llm::resolve_connection_for(state, req.connection_id, req.model.as_deref(), boarddo_shared::v2::TaskKind::Reasoning)
         .await
         .map_err(ToolError::Invalid)?;
     let svc = ToolService::new(state.storage.clone());

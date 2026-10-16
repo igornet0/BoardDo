@@ -34,6 +34,9 @@ pub struct ExecutionContext {
     pub node_state: Arc<dyn NodeStateStore>,
     pub custom_tools: Arc<dyn CustomToolGateway>,
     pub media: MediaStore,
+    /// Call journal guarding single-execution nodes; `None` only in
+    /// sandboxes / tests, where such nodes run unguarded.
+    pub journal: Option<Arc<dyn super::journal::CallJournal>>,
 }
 
 impl std::fmt::Debug for ExecutionContext {
@@ -84,7 +87,13 @@ impl ExecutionContext {
             media: MediaStore::new(
                 std::env::var("BOARDDO_DATA_DIR").unwrap_or_else(|_| "data".into()),
             ),
+            journal: None,
         }
+    }
+
+    pub fn with_journal(mut self, journal: Option<Arc<dyn super::journal::CallJournal>>) -> Self {
+        self.journal = journal;
+        self
     }
 
     pub fn with_custom_tools(mut self, custom_tools: Arc<dyn CustomToolGateway>) -> Self {

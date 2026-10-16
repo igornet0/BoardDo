@@ -29,6 +29,7 @@ pub struct Engine {
     node_state: Arc<dyn NodeStateStore>,
     custom_tools: Arc<dyn CustomToolGateway>,
     media: MediaStore,
+    journal: Option<Arc<dyn super::journal::CallJournal>>,
 }
 
 impl Engine {
@@ -51,7 +52,13 @@ impl Engine {
             media: MediaStore::new(
                 std::env::var("BOARDDO_DATA_DIR").unwrap_or_else(|_| "data".into()),
             ),
+            journal: None,
         }
+    }
+
+    pub fn with_journal(mut self, journal: Arc<dyn super::journal::CallJournal>) -> Self {
+        self.journal = Some(journal);
+        self
     }
 
     pub fn with_custom_tools(mut self, custom_tools: Arc<dyn CustomToolGateway>) -> Self {
@@ -136,7 +143,8 @@ impl Engine {
         .with_browser(self.browser.clone())
         .with_node_state(self.node_state.clone())
         .with_custom_tools(self.custom_tools.clone())
-        .with_media(self.media.clone());
+        .with_media(self.media.clone())
+        .with_journal(self.journal.clone());
 
         if let Err(errors) = self.validate(definition) {
             let msg = format!("Workflow validation failed: {}", errors.join("; "));

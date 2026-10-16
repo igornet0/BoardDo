@@ -29,6 +29,9 @@ pub struct PolicyBundle {
     pub blocked_domains: Vec<String>,
     #[serde(default)]
     pub kill_switch: bool,
+    /// Attempt limits, stop conditions and escalation thresholds.
+    #[serde(default)]
+    pub replan: super::ReplanLimits,
 }
 
 fn default_max_actions() -> u32 {
@@ -45,6 +48,7 @@ impl Default for PolicyBundle {
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
             kill_switch: false,
+            replan: Default::default(),
         }
     }
 }
@@ -155,6 +159,9 @@ pub struct GoalRun {
     pub started_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<DateTime<Utc>>,
+    /// Replanning counters (failure streak, stagnation, escalations).
+    #[serde(default)]
+    pub replan: super::ReplanState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -513,76 +520,17 @@ pub fn resolve_tool_alias(type_id: &str) -> &str {
     }
 }
 
+/// Capability gating a tool, from the unified tool registry. Unknown ids fall
+/// back to the generic HTTP capability.
 pub fn capability_for_tool(type_id: &str) -> &'static str {
-    let type_id = resolve_tool_alias(type_id);
-    if let Some(cap) = super::custom_tool::custom_tool_capability(type_id) {
-        return cap;
-    }
-    if let Some(cap) = super::content::content_capability_for_tool(type_id) {
-        return cap;
-    }
-    if let Some(cap) = super::marketing::marketing_capability_for_tool(type_id) {
-        return cap;
-    }
-    match type_id {
-        "web.search" => super::capability::caps::WEB_SEARCH,
-        "web.fetch" | "web.open" | "web.extract" => super::capability::caps::WEB_FETCH,
-        "http.request" => super::capability::caps::HTTP_REQUEST,
-        "ai.chat" | "ai.generate" | "ai.image" | "ai.audio" | "ai.video" => {
-            super::capability::caps::AI_GENERATE
-        }
-        "ai.analyze" | "ai.classify" => super::capability::caps::AI_ANALYZE,
-        "telegram.send_message"
-        | "telegram.send_photo"
-        | "telegram.send_document"
-        | "telegram.user.send_message"
-        | "publisher.telegram.send"
-        | "publisher.telegram.prepare" => super::capability::caps::TELEGRAM_WRITE,
-        "github.get_latest_release" => super::capability::caps::GITHUB_READ,
-        "debug.log" | "memory.write" | "memory.read" => super::capability::caps::ARTIFACT_WRITE,
-        "analytics.record_lead" | "analytics.record_progress" | "analytics.campaign_metrics"
-        | "analytics.read" => super::capability::caps::RESEARCH_WRITE,
-        "workflow.list"
-        | "workflow.get"
-        | "workflow.create"
-        | "workflow.update"
-        | "workflow.validate"
-        | "scenario.apply_ops"
-        | "goal.propose_plan"
-        | "goal.materialize_plan"
-        | "campaign.bootstrap_plan" => super::capability::caps::WORKFLOW_EDIT,
-        "workflow.run"
-        | "workflow.activate"
-        | "workflow.get_execution"
-        | "workflow.list_executions" => super::capability::caps::WORKFLOW_INVOKE,
-        "connection.list" | "connection.test" | "telegram.accounts.list" => {
-            super::capability::caps::ARTIFACT_WRITE
-        }
-        _ => super::capability::caps::HTTP_REQUEST,
-    }
+    super::tool_registry::lookup_tool(type_id)
+        .map(|d| d.capability)
+        .unwrap_or(super::capability::caps::HTTP_REQUEST)
 }
 
 /// Tools that inspect state and should not consume the daily action budget.
 pub fn tool_counts_as_action(type_id: &str) -> bool {
-    let type_id = resolve_tool_alias(type_id);
-    !matches!(
-        type_id,
-        "workflow.list"
-            | "workflow.get"
-            | "workflow.validate"
-            | "workflow.get_execution"
-            | "workflow.list_executions"
-            | "memory.read"
-            | "connection.list"
-            | "connection.test"
-            | "telegram.accounts.list"
-            | "goal.propose_plan"
-            | "campaign.bootstrap_plan"
-            | "research.fetch"
-            | "analytics.campaign_metrics"
-            | "analytics.read"
-            | "analytics.query"
-            | "lead.score"
-            | "conversation.classify"
-    )
+    super::tool_registry::lookup_tool(type_id)
+        .map(|d| d.counts_as_action)
+        .unwrap_or(true)
 }

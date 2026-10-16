@@ -396,6 +396,7 @@ mod tests {
             error: None,
             started_at: Utc::now(),
             finished_at: None,
+            replan: Default::default(),
         };
         state.storage.insert_goal_run(&run).await.unwrap();
         let mut metadata = serde_json::Map::new();

@@ -274,7 +274,7 @@ async fn ai_analyze(State(state): State<SharedState>, Path(id): Path<String>, bo
     let body = body.map(|Json(b)| b).unwrap_or_default();
     let client = ph().await?;
     let (detail, facts) = project_facts(&client, &id).await?;
-    let llm = llm::resolve(&state, &Objective::new("projecthub")).await.map_err(bad)?;
+    let llm = llm::resolve_for(&state, &Objective::new("projecthub"), boarddo_shared::v2::TaskKind::Summarization).await.map_err(bad)?;
     let system = format!(
         "You are a senior engineer writing a project brief for teammates and AI agents. {} \
          Return Markdown only (no code fences around the whole answer) with these sections, headings \
@@ -324,7 +324,7 @@ async fn ai_suggest_tasks(State(state): State<SharedState>, Path(id): Path<Strin
     let count = body.count.unwrap_or(5).clamp(1, 15);
     let client = ph().await?;
     let (detail, facts) = project_facts(&client, &id).await?;
-    let llm = llm::resolve(&state, &Objective::new("projecthub")).await.map_err(bad)?;
+    let llm = llm::resolve_for(&state, &Objective::new("projecthub"), boarddo_shared::v2::TaskKind::Planning).await.map_err(bad)?;
     let system = format!(
         "You plan engineering work for a code project. {} Propose up to {count} concrete, independent tasks \
          that move the project forward (bugs, missing tests, docs, refactors, features from the README/notes, \
